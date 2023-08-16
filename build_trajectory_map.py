@@ -127,18 +127,18 @@ def build_user_all_graph(df):
 
 
 def save_graph_to_pickle(G):
-    pickle.dump(G, open(os.path.join('./graph/{}/global_graph.pkl'.format(data_type)), 'wb'))
+    pickle.dump(G, open(os.path.join('./graph/{}/global_graph.pkl'.format(data_name)), 'wb'))
 
 
 def save_graph_edge(G):
     nodelist = G.nodes()
     node_id2idx = {k: v for v, k in enumerate(nodelist)}
 
-    with open(os.path.join('./graph/{}/graph_node_id2idx.txt'.format(data_type)), 'w') as f:
+    with open(os.path.join('./graph/{}/graph_node_id2idx.txt'.format(data_name)), 'w') as f:
         for i, node in enumerate(nodelist):
             print(f'{node} {i}', file=f)
 
-    with open(os.path.join('./graph/{}/graph_edge.edgelist'.format(data_type)), 'w') as f:
+    with open(os.path.join('./graph/{}/graph_edge.edgelist'.format(data_name)), 'w') as f:
         for edge in nx.generate_edgelist(G, data=['weight']):
             src_node, dst_node, weight = edge.split(' ')
             print(f'{node_id2idx[int(src_node)]} {node_id2idx[int(dst_node)]} {weight}', file=f)
@@ -147,29 +147,28 @@ def save_graph_edge(G):
 def save_graph_dist(G):
     nodelist = G.nodes()
     node_id2idx = {k: v for v, k in enumerate(nodelist)}
-    with open(os.path.join('./graph/{}/graph_dist.distlist'.format(data_type)), 'w') as f:
+    with open(os.path.join('./graph/{}/graph_dist.distlist'.format(data_name)), 'w') as f:
         for edge in nx.generate_edgelist(G, data=['distance']):
             src_node, dst_node, dis = edge.split(' ')
             print(f'{node_id2idx[int(src_node)]} {node_id2idx[int(dst_node)]} {dis}', file=f)
 
 
 def save_users_graph(graphs, users):
-    count = 1
+    print(users)
     for G, user in zip(graphs, users):
         nodelist = G.nodes()
         node_id2idx = {k: v for v, k in enumerate(nodelist)}
 
-        with open(os.path.join('./graph/{}/user_graph/id2idx/{}_node_id2idx.txt'.format(data_type, count)), 'w') as f:
+        with open(os.path.join('./graph/{}/user_graph/id2idx/{}_node_id2idx.txt'.format(data_name, user)), 'w') as f:
             for i, node in enumerate(nodelist):
                 print(f'{node} {i}', file=f)
 
-        pickle.dump(G, open(os.path.join('./graph/{}/user_graph/graph/{}_graph.pkl'.format(data_type, user)), 'wb'))
+        pickle.dump(G, open(os.path.join('./graph/{}/user_graph/graph/{}_graph.pkl'.format(data_name, user)), 'wb'))
 
-        with open(os.path.join('./graph/{}/user_graph/edges/{}_edges.edgelist'.format(data_type, user)), 'w') as f:
+        with open(os.path.join('./graph/{}/user_graph/edges/{}_edges.edgelist'.format(data_name, user)), 'w') as f:
             for edge in nx.generate_edgelist(G, data=['weight']):
                 src_node, dst_node, weight = edge.split(' ')
                 print(f'{node_id2idx[int(src_node)]} {node_id2idx[int(dst_node)]} {weight}', file=f)
-        count += 1
 
 
 def main():
@@ -185,6 +184,22 @@ def main():
     save_users_graph(user_all_graph, users)
 
 
+def mkdirs():
+    if not os.path.exists('./graph'):
+        os.makedirs('./graph')
+    if not os.path.exists('./graph/{}'.format(data_name)):
+        os.makedirs('./graph/{}'.format(data_name))
+    if not os.path.exists('./graph/{}/user_graph'.format(data_name)):
+        os.makedirs('./graph/{}/user_graph'.format(data_name))
+    if not os.path.exists('./graph/{}/user_graph/edges'.format(data_name)):
+        os.makedirs('./graph/{}/user_graph/edges'.format(data_name))
+    if not os.path.exists('./graph/{}/user_graph/graph'.format(data_name)):
+        os.makedirs('./graph/{}/user_graph/graph'.format(data_name))
+    if not os.path.exists('./graph/{}/user_graph/id2idx'.format(data_name)):
+        os.makedirs('./graph/{}/user_graph/id2idx'.format(data_name))
+
+
 if __name__ == '__main__':
-    data_type = 'nyc'
+    data_name = 'NYC'
+    mkdirs()
     main()

@@ -1,3 +1,4 @@
+import os
 import glob
 import torch
 import pickle
@@ -20,11 +21,11 @@ def get_edge_index(edges):
 
 
 def build_global_graph_data():
-    node_index = np.loadtxt('./graph/{}/graph_node_id2idx.txt'.format(data_type), dtype=int)
+    node_index = np.loadtxt('./graph/{}/graph_node_id2idx.txt'.format(data_name), dtype=int)
     node_dict = np_to_dict(node_index)
-    global_edges = np.loadtxt('./graph/{}/graph_edge.edgelist'.format(data_type), dtype=int)
+    global_edges = np.loadtxt('./graph/{}/graph_edge.edgelist'.format(data_name), dtype=int)
     edge_index = get_edge_index(global_edges)
-    global_graph = nx.read_gpickle('./graph/{}/global_graph.pkl'.format(data_type))
+    global_graph = nx.read_gpickle('./graph/{}/global_graph.pkl'.format(data_name))
     node_feature = global_graph._node
     features = []
     for key in node_dict.keys():
@@ -34,16 +35,16 @@ def build_global_graph_data():
         features.append(feature)
     features = torch.LongTensor(features)
     data = Data(x=features, edge_index=edge_index)
-    pickle.dump(data, open('./processed/{}/global_graph_data.pkl'.format(data_type), 'wb'))
+    pickle.dump(data, open('./processed/{}/global_graph_data.pkl'.format(data_name), 'wb'))
 
 
 def build_user_graph_data():
-    users = glob.glob('./graph/{}/user_graph/edges/*.edgelist'.format(data_type))
+    users = glob.glob('./graph/{}/user_graph/edges/*.edgelist'.format(data_name))
     user_count = len(users) + 1
     for i in range(1, user_count):
-        idx_file = './graph/{}/user_graph/id2idx/'.format(data_type) + str(i) + '_node_id2idx.txt'
-        edge_file = './graph/{}/user_graph/edges/'.format(data_type) + str(i) + '_edges.edgelist'
-        graph_file = './graph/{}/user_graph/graph/'.format(data_type) + str(i) + '_graph.pkl'
+        idx_file = './graph/{}/user_graph/id2idx/'.format(data_name) + str(i) + '_node_id2idx.txt'
+        edge_file = './graph/{}/user_graph/edges/'.format(data_name) + str(i) + '_edges.edgelist'
+        graph_file = './graph/{}/user_graph/graph/'.format(data_name) + str(i) + '_graph.pkl'
         node_index = np.loadtxt(idx_file, dtype=int)
         node_dict = np_to_dict(node_index)
         graph = nx.read_gpickle(graph_file)
@@ -58,7 +59,7 @@ def build_user_graph_data():
             features.append(feature)
         features = torch.LongTensor(features)
         data = Data(x=features, edge_index=edge_index)
-        pickle.dump(data, open('./processed/{}/users/{}_user_graph_data.pkl'.format(data_type, i), 'wb'))
+        pickle.dump(data, open('./processed/{}/users/{}_user_graph_data.pkl'.format(data_name, i), 'wb'))
 
 
 def get_dist_dict(dist):
@@ -77,11 +78,11 @@ def get_dist_dict(dist):
 
 
 def build_dist_graph_data():
-    graph_dist = np.loadtxt('./graph/{}/graph_dist.distlist'.format(data_type))
+    graph_dist = np.loadtxt('./graph/{}/graph_dist.distlist'.format(data_name))
     dist_dict = get_dist_dict(graph_dist)
-    node_index = np.loadtxt('./graph/{}/graph_node_id2idx.txt'.format(data_type), dtype=int)
+    node_index = np.loadtxt('./graph/{}/graph_node_id2idx.txt'.format(data_name), dtype=int)
     node_dict = np_to_dict(node_index)
-    global_edges = np.loadtxt('./graph/{}/graph_edge.edgelist'.format(data_type), dtype=int)
+    global_edges = np.loadtxt('./graph/{}/graph_edge.edgelist'.format(data_name), dtype=int)
     edge_index = get_edge_index(global_edges)
     features = []
     max_len = -1
@@ -103,11 +104,21 @@ def build_dist_graph_data():
         features[i] = np.pad(features[i], (0, pad_len), 'constant')
     features = torch.LongTensor(features)
     data = Data(x=features, edge_index=edge_index)
-    pickle.dump(data, open('./processed/{}/global_dist_data.pkl'.format(data_type), 'wb'))
+    pickle.dump(data, open('./processed/{}/global_dist_data.pkl'.format(data_name), 'wb'))
+
+
+def mkdirs():
+    if not os.path.exists('./processed'):
+        os.makedirs('./processed')
+    if not os.path.exists('./processed/{}'.format(data_name)):
+        os.makedirs('./processed/{}'.format(data_name))
+    if not os.path.exists('./processed/{}/users'.format(data_name)):
+        os.makedirs('./processed/{}/users'.format(data_name))
 
 
 if __name__ == '__main__':
-    data_type = 'nyc'
+    data_name = 'NYC'
+    mkdirs()
     # build_global_graph_data()
-    # build_user_graph_data()
-    build_dist_graph_data()
+    build_user_graph_data()
+    # build_dist_graph_data()
