@@ -1,5 +1,6 @@
 import os
 import glob
+import torch
 import pickle
 import numpy as np
 import pandas as pd
@@ -18,17 +19,19 @@ class PoiDataset(data.Dataset):
             self.user_graph_path = './processed/TKY/users'
         with open(poi_data_path + '{}_data.pkl'.format(data_type), 'rb') as f:
             self.user_poi_data = pickle.load(f)
+        self.user_poi_data = torch.tensor(self.user_poi_data).float()
         self.user_graph_dict = {}
         self.load_user_graph()
+        self.data_len = len(self.user_poi_data)
 
     def __getitem__(self, index):
         x = self.user_poi_data[index, 0: 20]
         y = self.user_poi_data[index, -1]
-        graph = self.user_graph_dict[x[0, 0]]
-        return x, y, graph
+        graph = self.user_graph_dict[int(x[0, 0])]
+        return x, y[1], graph.x, graph.edge_index
 
     def __len__(self):
-        pass
+        return self.data_len
 
     def load_user_graph(self):
         users_graphs = glob.glob(self.user_graph_path + '/*.pkl')
