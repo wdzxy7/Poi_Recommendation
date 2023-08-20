@@ -4,13 +4,45 @@ import torch
 import pickle
 import numpy as np
 import pandas as pd
+import torch.nn as nn
 import torch.utils.data as data
 from build_trajectory_map import pre_process
+
+
+class MinMaxNormalization(object):
+    def __init__(self, min_=None, max_=None):
+        self.min = min_
+        self.max = max_
+        pass
+
+    def fit(self, X):
+        if self.min is None:
+            self._min = X.min()
+            self._max = X.max()
+        else:
+            self._min = self.min
+            self._max = self.max
+        print("min:", self._min, "max: ", self._max)
+
+    def transform(self, X):
+        X = 1. * (X - self._min) / (self._max - self._min)
+        X = X * 2. - 1.
+        return X
+
+    def fit_transform(self, X):
+        self.fit(X)
+        return self.transform(X)
+
+    def inverse_transform(self, X):
+        X = (X + 1.) / 2.
+        X = 1. * X * (self._max - self._min) + self._min
+        return X
 
 
 class PoiDataset(data.Dataset):
     def __init__(self, data_name, data_type='train'):
         self.data_name = data_name
+        self.max_graph_node = 0
         if data_name == 'NYC':
             poi_data_path = './processed/NYC/poi_data/'
             self.user_graph_path = './processed/NYC/users'
@@ -22,6 +54,7 @@ class PoiDataset(data.Dataset):
         self.user_poi_data = torch.tensor(self.user_poi_data).float()
         self.user_graph_dict = {}
         self.load_user_graph()
+        self.pad_graph()
         self.data_len = len(self.user_poi_data)
 
     def __getitem__(self, index):
@@ -33,12 +66,20 @@ class PoiDataset(data.Dataset):
     def __len__(self):
         return self.data_len
 
+    def pad_graph(self):
+        for key in self.user_graph_dict.keys():
+            l = self.user_graph_dict[key].x.shape[0]
+            pad = nn.ZeroPad2d(padding=(0, 0, 0, self.max_graph_node - l))
+            self.user_graph_dict[key].x = pad(self.user_graph_dict[key].x)
+
     def load_user_graph(self):
         users_graphs = glob.glob(self.user_graph_path + '/*.pkl')
         user_count = len(users_graphs)
         for graph, user in zip(users_graphs, range(1, user_count + 1)):
             with open(graph, "rb") as f:
                 self.user_graph_dict[user] = pickle.load(f)
+                if self.user_graph_dict[user].x.shape[0] > self.max_graph_node:
+                    self.max_graph_node = self.user_graph_dict[user].x.shape[0]
 
 
 def spilt_data(data_name, current_len=20, rate=0.8):
@@ -50,6 +91,11 @@ def spilt_data(data_name, current_len=20, rate=0.8):
     df.columns = ["user_id", "poi_id", "cat_id", "cat_name", "latitude", "longitude", "timezone", "time"]
     df = pre_process(df)
     df.drop(['cat_name', 'time', 'timezone'], axis=1, inplace=True)
+    mmn = MinMaxNormalization()
+    arr = np.array(df[['latitude', 'longitude']])
+    mmn.fit(arr)
+    mmn_all_data = [mmn.transform(d) for d in arr]
+    df[['latitude', 'longitude']] = mmn_all_data
     train_data = []
     test_data = []
     for _, group in df.groupby('user_id'):
@@ -77,5 +123,5 @@ def spilt_data(data_name, current_len=20, rate=0.8):
 
 
 if __name__ == '__main__':
-    # spilt_data('NYC')
+    spilt_data('NYC')
     data = PoiDataset('NYC', 'train')

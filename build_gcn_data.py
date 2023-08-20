@@ -4,6 +4,7 @@ import torch
 import pickle
 import numpy as np
 import networkx as nx
+from utils import MinMaxNormalization
 from torch_geometric.data import Data
 
 
@@ -31,9 +32,14 @@ def build_global_graph_data():
     for key in node_dict.keys():
         node_id = node_dict[key]
         node = node_feature[node_id]
-        feature = [node['checkin_cnt'], node['poi_catid'], node['latitude'], node['longitude']]
+        feature = [node_id, node['poi_catid'], node['checkin_cnt'], node['latitude'], node['longitude']]
         features.append(feature)
-    features = torch.LongTensor(features)
+    features = torch.FloatTensor(features)
+    gps = features[:, 3: 5].numpy()
+    mmn = MinMaxNormalization()
+    mmn.fit(gps)
+    mmn_all_data = [mmn.transform(d) for d in gps]
+    features[:, 3: 5] = torch.FloatTensor(mmn_all_data)
     data = Data(x=features, edge_index=edge_index)
     pickle.dump(data, open('./processed/{}/global_graph_data.pkl'.format(data_name), 'wb'))
 
@@ -55,9 +61,14 @@ def build_user_graph_data():
         for key in node_dict.keys():
             node_id = node_dict[key]
             node = node_feature[node_id]
-            feature = [node['checkin_cnt'], node['poi_catid'], node['latitude'], node['longitude']]
+            feature = [node_id, node['poi_catid'], node['checkin_cnt'], node['latitude'], node['longitude']]
             features.append(feature)
-        features = torch.LongTensor(features)
+        features = torch.FloatTensor(features)
+        gps = features[:, 3: 5].numpy()
+        mmn = MinMaxNormalization(min_=-74.274765, max_=40.987644)
+        mmn.fit(gps)
+        mmn_all_data = [mmn.transform(d) for d in gps]
+        features[:, 3: 5] = torch.FloatTensor(mmn_all_data)
         data = Data(x=features, edge_index=edge_index)
         pickle.dump(data, open('./processed/{}/users/{}_user_graph_data.pkl'.format(data_name, i), 'wb'))
 
@@ -102,7 +113,7 @@ def build_dist_graph_data():
     for i in range(len(features)):
         pad_len = max_len * 2 - len(features[i])
         features[i] = np.pad(features[i], (0, pad_len), 'constant')
-    features = torch.LongTensor(features)
+    features = torch.FloatTensor(features)
     data = Data(x=features, edge_index=edge_index)
     pickle.dump(data, open('./processed/{}/global_dist_data.pkl'.format(data_name), 'wb'))
 
@@ -119,6 +130,6 @@ def mkdirs():
 if __name__ == '__main__':
     data_name = 'NYC'
     mkdirs()
-    # build_global_graph_data()
+    build_global_graph_data()
     build_user_graph_data()
-    # build_dist_graph_data()
+    build_dist_graph_data()
