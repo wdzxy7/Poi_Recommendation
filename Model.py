@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 import torch.nn as nn
 from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv
@@ -43,7 +42,7 @@ class GlobalGraphNet(nn.Module):
 
 
 class GlobalDistNet(nn.Module):
-    def __init__(self, poi_len=38333, graph_features=898, embed_dim=128, out_dim=128):
+    def __init__(self,  embed_dim=128, poi_len=38333, graph_features=898, out_dim=128):
         super(GlobalDistNet, self).__init__()
         self.poi_len = poi_len
         self.emb = nn.Embedding(poi_len, embed_dim)
@@ -121,12 +120,18 @@ class UserGraphNet(nn.Module):
 
 
 class UserHistoryNet(nn.Module):
-    def __init__(self, cat_len=400, poi_len=38333, user_len=1083, embed_dim=128):
+    def __init__(self, cat_len=400, poi_len=38333, user_len=1083, embed_dim=128, hidden_size=128, lstm_layers=3):
         super(UserHistoryNet, self).__init__()
-        self.emb = nn.Embedding(3, embed_dim)
+        self.emb = nn.Embedding(cat_len + poi_len + user_len, (embed_dim - 7) // 3)
+        self.lstm = nn.LSTM(embed_dim, hidden_size, lstm_layers, dropout=0.5, batch_first=True)
 
     def forward(self, inputs):
-        pass
+        id_feature = inputs[:, :, 0: 3].int()
+        embed_feature = self.emb(id_feature)
+        embed_feature = embed_feature.reshape(inputs.shape[0], inputs.shape[1], -1)
+        inputs = torch.cat((embed_feature, inputs[:, :, 2: 10]), dim=2)
+        output = self.lstm(inputs)
+        return output[0]
 
 
 class TransformerModel(nn.Module):
@@ -141,6 +146,8 @@ class TransformerModel(nn.Module):
 class GlobalUserNet(nn.Module):
     def __init__(self):
         super(GlobalUserNet, self).__init__()
+        self.transformer = TransformerModel()
 
-    def forward(self, inputs):
-        pass
+    def forward(self, user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature):
+        inputs = torch.cat([global_graph_feature, global_dist_feature, user_graph_feature, user_history_feature], dim=2)
+        return 0

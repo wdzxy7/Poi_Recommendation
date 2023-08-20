@@ -1,8 +1,8 @@
 import os
-import random
 import sys
 import torch
 import pickle
+import random
 import logging
 import argparse
 import torch.nn as nn
@@ -21,6 +21,9 @@ parser.add_argument('--global_dist_dim', type=int, default=128, help='The embedd
 parser.add_argument('--global_dist_features', type=int, default=898, help='The feature sum of global distance graph')
 parser.add_argument('--user_graph_dim', type=int, default=128, help='The embedding dim of UserGraphNet')
 parser.add_argument('--user_history_dim', type=int, default=128, help='The embedding dim of UserHistoryNet')
+parser.add_argument('--hidden_size', type=int, default=128, help='The hidden size in UserHistoryNet`s LSTM')
+parser.add_argument('--lstm_layers', type=int, default=3, help='The layer of LSTM model in UserHistoryNet')
+parser.add_argument('--out_dim', type=int, default=128, help='The dim of previous four model')
 parser.add_argument('--epochs', type=int, default=150, help='Epochs of train')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size of dataloader')
 parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate of optimizer')
@@ -64,10 +67,14 @@ def train():
     train_loader, test_loader = load_data()
     global_graph, global_dist = load_global_graph()
     dist_mask = get_dist_mask(global_dist)
-    global_graph_model = GlobalGraphNet()
-    global_dist_model = GlobalDistNet()
-    user_graph_model = UserGraphNet()
-    user_history_model = UserHistoryNet()
+    global_graph_model = GlobalGraphNet(embed_dim=global_graph_dim, cat_len=cat_len, poi_len=poi_len, user_len=user_len,
+                                        out_dim=out_dim)
+    global_dist_model = GlobalDistNet(embed_dim=global_dist_dim, poi_len=poi_len, graph_features=global_dist_features,
+                                      out_dim=out_dim)
+    user_graph_model = UserGraphNet(embed_dim=user_graph_dim, cat_len=cat_len, poi_len=poi_len, node_len=node_len,
+                                    out_dim=out_dim)
+    user_history_model = UserHistoryNet(embed_dim=user_history_dim, cat_len=cat_len, poi_len=poi_len, user_len=user_len,
+                                        hidden_size=out_dim, lstm_layers=lstm_layers)
     global_user_model = GlobalUserNet()
     global_graph_model.to(device)
     global_dist_model.to(device)
@@ -106,8 +113,9 @@ def train():
             global_dist_feature = global_dist_model(global_dist, dist_mask)
             user_graph_feature = user_graph_model(user_graph, user_graph_edges)
             user_history_feature = user_history_model(history_feature)
-            global_graph_feature = global_graph_feature.repeat(y.shape[0], 1)
-            global_dist_feature = global_dist_feature.repeat(y.shape[0], 1)
+            global_graph_feature = global_graph_feature.repeat(y.shape[0], 20, 1)
+            global_dist_feature = global_dist_feature.repeat(y.shape[0], 20, 1)
+            user_graph_feature = user_graph_feature.reshape(y.shape[0], 1, -1).repeat(1, 20, 1)
             y_pred = global_user_model(user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature)
             y_pred, indices = torch.sort(y_pred, dim=1, descending=True)
             precision_1 += cal_precision(indices, y, 1, train_len)
@@ -175,11 +183,25 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     device = torch.device(gpu_num)
     # model parameters
-    global_graph_dim = args.global_graph_dim
-    global_dist_dim = args.global_dist_dim
-    user_graph_dim = args.user_graph_dim
-    user_history_dim = args.user_history_dim
+    # Share
+    cat_len = args.cat_len
     node_len = args.node_len
+    poi_len = args.poi_len
+    user_len = args.user_len
+    out_dim = args.out_dim
+    # GlobalGraphNet
+    global_graph_dim = args.global_graph_dim
+    # GlobalDistNet
+    global_dist_dim = args.global_dist_dim
+    global_dist_features = args.global_dist_features
+    # UserGraphNet
+    user_graph_dim = args.user_graph_dim
+    # UserHistoryNet
+    user_history_dim = args.user_history_dim
+    hidden_size = args.hidden_size
+    lstm_layers = args.lstm_layers
+    # GlobalUserNet
+
     # train parameters
     lr = args.lr
     batch_size = args.batch_size
