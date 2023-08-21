@@ -43,6 +43,7 @@ class PoiDataset(data.Dataset):
     def __init__(self, data_name, data_type='train'):
         self.data_name = data_name
         self.max_graph_node = 0
+        self.max_graph_edges = 0
         if data_name == 'NYC':
             poi_data_path = './processed/NYC/poi_data/'
             self.user_graph_path = './processed/NYC/users'
@@ -58,19 +59,22 @@ class PoiDataset(data.Dataset):
         self.data_len = len(self.user_poi_data)
 
     def __getitem__(self, index):
-        x = self.user_poi_data[index, 0: 20]
-        y = self.user_poi_data[index, -1]
+        x = self.user_poi_data[index, :-1]
+        y = self.user_poi_data[index, 1:, 1]
         graph = self.user_graph_dict[int(x[0, 0])]
-        return x, y[1], graph.x, graph.edge_index
+        return x, y, graph.x, graph.edge_index
 
     def __len__(self):
         return self.data_len
 
     def pad_graph(self):
         for key in self.user_graph_dict.keys():
-            l = self.user_graph_dict[key].x.shape[0]
-            pad = nn.ZeroPad2d(padding=(0, 0, 0, self.max_graph_node - l))
+            nodes = self.user_graph_dict[key].x.shape[0]
+            pad = nn.ZeroPad2d(padding=(0, 0, 0, self.max_graph_node - nodes))
             self.user_graph_dict[key].x = pad(self.user_graph_dict[key].x)
+            edges = self.user_graph_dict[key].edge_index.shape[1]
+            pad = nn.ZeroPad2d(padding=(0, self.max_graph_edges - edges, 0, 0))
+            self.user_graph_dict[key].edge_index = pad(self.user_graph_dict[key].edge_index)
 
     def load_user_graph(self):
         users_graphs = glob.glob(self.user_graph_path + '/*.pkl')
@@ -80,6 +84,8 @@ class PoiDataset(data.Dataset):
                 self.user_graph_dict[user] = pickle.load(f)
                 if self.user_graph_dict[user].x.shape[0] > self.max_graph_node:
                     self.max_graph_node = self.user_graph_dict[user].x.shape[0]
+                if self.user_graph_dict[user].edge_index.shape[1] > self.max_graph_edges:
+                    self.max_graph_edges = self.user_graph_dict[user].edge_index.shape[1]
 
 
 def spilt_data(data_name, current_len=20, rate=0.8):

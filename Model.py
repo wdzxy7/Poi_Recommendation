@@ -1,8 +1,10 @@
+import math
 import torch
 import torch.nn as nn
 from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv
 from torch_geometric.loader import DataLoader
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 
 class GlobalGraphNet(nn.Module):
@@ -134,20 +136,51 @@ class UserHistoryNet(nn.Module):
         return output[0]
 
 
-class TransformerModel(nn.Module):
-    def __init__(self):
-        super(TransformerModel, self).__init__()
-        pass
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout=0.1, max_len=500):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, inputs):
-        pass
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+
+
+class TransformerModel(nn.Module):
+    def __init__(self, embed_dim, dropout, tran_head, tran_hid, tran_layers, poi_len):
+        super(TransformerModel, self).__init__()
+        self.pos_encoder = PositionalEncoding(embed_dim, dropout)
+        encoder_layers = TransformerEncoderLayer(embed_dim, tran_head, tran_hid, dropout)
+        self.transformer_encoder = TransformerEncoder(encoder_layers, tran_layers)
+        self.embed_size = embed_dim
+        self.decoder_poi = nn.Linear(embed_dim, poi_len)
+        self.init_weights()
+
+    def init_weights(self):
+        initrange = 0.1
+        self.decoder_poi.bias.data.zero_()
+        self.decoder_poi.weight.data.uniform_(-initrange, initrange)
+
+    def forward(self, user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature):
+        inputs = torch.cat([global_graph_feature, global_dist_feature, user_graph_feature, user_history_feature], dim=2)
+        x = self.transformer_encoder(inputs)
+        out_poi = self.decoder_poi(x)
+        return out_poi
 
 
 class GlobalUserNet(nn.Module):
     def __init__(self):
         super(GlobalUserNet, self).__init__()
-        self.transformer = TransformerModel()
-
-    def forward(self, user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature):
-        inputs = torch.cat([global_graph_feature, global_dist_feature, user_graph_feature, user_history_feature], dim=2)
-        return 0
+        global_graph_net = GlobalGraphNet()
+        global_dist_net = GlobalDistNet()
+        user_graph_net = UserGraphNet()
+        user_history_net = UserHistoryNet()
+        transformer = TransformerModel()
