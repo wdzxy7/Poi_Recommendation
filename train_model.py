@@ -44,8 +44,8 @@ def load_data():
     train_loader = data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=False)
     test_dataset = PoiDataset(data_name, data_type='test')
     test_loader = data.DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
-    train_len = train_dataset.data_len
-    test_len = test_dataset.data_len
+    train_len = len(train_loader)
+    test_len = len(test_loader)
     return train_loader, test_loader
 
 
@@ -134,7 +134,6 @@ def train():
             precision_20 += cal_precision(indices, y, 20, train_len)
             optimizer.step()
             sys.stdout.write("\rTRAINDATE:  Epoch:{}\t\t loss:{} res train:{}".format(i, loss.item(), train_len - _))
-            break
         test_model(global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer, test_loader,
                    global_graph, global_dist, dist_mask)
         test_count += 1
@@ -172,12 +171,11 @@ def test_model(global_graph_model, global_dist_model, user_graph_model, user_his
             y_pred = y_pred[:, -1, :]
             y = y[:, -1]
             y_pred, indices = torch.sort(y_pred, dim=1, descending=True)
-            precision_1 += cal_precision(indices, y, 1, train_len)
-            precision_5 += cal_precision(indices, y, 5, train_len)
-            precision_10 += cal_precision(indices, y, 10, train_len)
-            precision_15 += cal_precision(indices, y, 15, train_len)
-            precision_20 += cal_precision(indices, y, 20, train_len)
-            break
+            precision_1 += cal_precision(indices, y, 1, test_len)
+            precision_5 += cal_precision(indices, y, 5, test_len)
+            precision_10 += cal_precision(indices, y, 10, test_len)
+            precision_15 += cal_precision(indices, y, 15, test_len)
+            precision_20 += cal_precision(indices, y, 20, test_len)
     print("\rTESTING:  precision_1:{.4f}\t\t precision_5:{.4f}\t\t precision_10:{.4f}\t\t precision_20:{.4f}".format(precision_1,
           precision_5, precision_10, precision_20))
     mess = "\rTESTING:  precision_1:{.4f}\t\t precision_5:{.4f}\t\t precision_10:{.4f}\t\t precision_20:{.4f}".format(precision_1,
