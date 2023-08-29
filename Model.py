@@ -10,12 +10,12 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 class GlobalGraphNet(nn.Module):
     def __init__(self, embed_dim=128, cat_len=400, poi_len=38333, user_len=1083, out_dim=128):
         super(GlobalGraphNet, self).__init__()
-        self.emb = nn.Embedding(cat_len + poi_len + user_len, (embed_dim - 3) // 2)
-        self.cov1 = GCNConv((embed_dim - 3) // 2 * 2 + 3, 64)
-        self.cov2 = GCNConv(64, 32)
-        self.cov3 = GCNConv(32, 32)
-        self.cov4 = GCNConv(32, 32)
-        self.cov5 = GCNConv(32, 1)
+        self.emb = nn.Embedding(cat_len + poi_len + user_len, embed_dim // 2)
+        self.cov1 = GCNConv(embed_dim // 2 * 2 + 3, 64)
+        self.cov2 = GCNConv(64, 64)
+        self.cov3 = GCNConv(64, 64)
+        self.cov4 = GCNConv(64, 64)
+        self.cov5 = GCNConv(64, 1)
         self.relu = nn.LeakyReLU()
         self.fc_layer = nn.Sequential(
             nn.Linear(poi_len, 128),
@@ -49,10 +49,10 @@ class GlobalDistNet(nn.Module):
         self.poi_len = poi_len
         self.emb = nn.Embedding(poi_len, embed_dim)
         self.cov1 = GCNConv(graph_features, 64)
-        self.cov2 = GCNConv(64, 32)
-        self.cov3 = GCNConv(32, 32)
-        self.cov4 = GCNConv(32, 32)
-        self.cov5 = GCNConv(32, 1)
+        self.cov2 = GCNConv(64, 64)
+        self.cov3 = GCNConv(64, 64)
+        self.cov4 = GCNConv(64, 64)
+        self.cov5 = GCNConv(64, 1)
         self.relu = nn.LeakyReLU()
         self.fc_layer = nn.Sequential(
             nn.Linear(poi_len, 128),
@@ -81,13 +81,13 @@ class GlobalDistNet(nn.Module):
 
 
 class UserGraphNet(nn.Module):
-    def __init__(self, cat_len=400, poi_len=38333, embed_dim=128, out_dim=128, node_len=714):
+    def __init__(self, cat_len=400, poi_len=5099, embed_dim=128, out_dim=128, node_len=714):
         super(UserGraphNet, self).__init__()
-        self.emb = nn.Embedding(cat_len + poi_len, (embed_dim - 3) // 2)
-        self.cov1 = GCNConv((embed_dim - 3) // 2 * 2 + 3, 32)
-        self.cov2 = GCNConv(32, 32)
-        self.cov3 = GCNConv(32, 32)
-        self.cov4 = GCNConv(32, 1)
+        self.emb = nn.Embedding(cat_len + poi_len, embed_dim // 2)
+        self.cov1 = GCNConv(embed_dim // 2 * 2 + 3, 64)
+        self.cov2 = GCNConv(64, 64)
+        self.cov3 = GCNConv(64, 64)
+        self.cov4 = GCNConv(64, 1)
         self.relu = nn.LeakyReLU()
         self.fc_layer = nn.Sequential(
             nn.Linear(node_len, 128),
@@ -122,16 +122,16 @@ class UserGraphNet(nn.Module):
 
 
 class UserHistoryNet(nn.Module):
-    def __init__(self, cat_len=400, poi_len=38333, user_len=1083, embed_dim=128, hidden_size=128, lstm_layers=3):
+    def __init__(self, cat_len=400, poi_len=5099, user_len=1083, embed_dim=128, hidden_size=128, lstm_layers=3):
         super(UserHistoryNet, self).__init__()
-        self.emb = nn.Embedding(cat_len + poi_len + user_len, (embed_dim - 7) // 3)
-        self.lstm = nn.LSTM(embed_dim, hidden_size, lstm_layers, dropout=0.5, batch_first=True)
+        self.emb = nn.Embedding(cat_len + poi_len + user_len, embed_dim // 3)
+        self.lstm = nn.LSTM(embed_dim // 3 * 3 + 11, hidden_size, lstm_layers, dropout=0.5, batch_first=True)
 
     def forward(self, inputs):
         id_feature = inputs[:, :, 0: 3].int()
         embed_feature = self.emb(id_feature)
         embed_feature = embed_feature.reshape(inputs.shape[0], inputs.shape[1], -1)
-        inputs = torch.cat((embed_feature, inputs[:, :, 2: 10]), dim=2)
+        inputs = torch.cat((embed_feature, inputs[:, :, 3:]), dim=2)
         output = self.lstm(inputs)
         return output[0]
 
@@ -157,6 +157,8 @@ class PositionalEncoding(nn.Module):
 class TransformerModel(nn.Module):
     def __init__(self, embed_dim, dropout, tran_head, tran_hid, tran_layers, poi_len):
         super(TransformerModel, self).__init__()
+        self.linear = nn.Linear(embed_dim, poi_len)
+        self.softmax = nn.Softmax(dim=1)
         self.pos_encoder = PositionalEncoding(embed_dim, dropout)
         encoder_layers = TransformerEncoderLayer(embed_dim, tran_head, tran_hid, dropout)
         self.transformer_encoder = TransformerEncoder(encoder_layers, tran_layers)
@@ -164,14 +166,21 @@ class TransformerModel(nn.Module):
         self.decoder_poi = nn.Linear(embed_dim, poi_len)
         self.init_weights()
 
+    def generate_square_subsequent_mask(self, sz):
+        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+        return mask
+
     def init_weights(self):
         initrange = 0.1
         self.decoder_poi.bias.data.zero_()
         self.decoder_poi.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature):
+    def forward(self, user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature, src_mask):
         inputs = torch.cat([global_graph_feature, global_dist_feature, user_graph_feature, user_history_feature], dim=2)
-        x = self.transformer_encoder(inputs)
+        # return self.softmax(self.linear(inputs))
+        inputs = self.pos_encoder(inputs)
+        x = self.transformer_encoder(inputs, src_mask)
         out_poi = self.decoder_poi(x)
         return out_poi
 

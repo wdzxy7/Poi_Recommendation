@@ -29,17 +29,25 @@ def build_global_graph_data():
     global_graph = nx.read_gpickle('./graph/{}/global_graph.pkl'.format(data_name))
     node_feature = global_graph._node
     features = []
+    max_checkin = 0
     for key in node_dict.keys():
         node_id = node_dict[key]
         node = node_feature[node_id]
         feature = [node_id, node['poi_catid'], node['checkin_cnt'], node['latitude'], node['longitude']]
         features.append(feature)
+        if node['checkin_cnt'] > max_checkin:
+            max_checkin = node['checkin_cnt']
     features = torch.FloatTensor(features)
     gps = features[:, 3: 5].numpy()
     mmn = MinMaxNormalization()
     mmn.fit(gps)
     mmn_all_data = [mmn.transform(d) for d in gps]
     features[:, 3: 5] = torch.FloatTensor(mmn_all_data)
+    checkins = features[:, 2: 3].numpy()
+    mmn = MinMaxNormalization(min_=0, max_=max_checkin)
+    mmn.fit(checkins)
+    mmn_all_data = [mmn.transform(d) for d in checkins]
+    features[:, 2: 3] = torch.FloatTensor(mmn_all_data)
     data = Data(x=features, edge_index=edge_index)
     pickle.dump(data, open('./processed/{}/global_graph_data.pkl'.format(data_name), 'wb'))
 
@@ -47,6 +55,7 @@ def build_global_graph_data():
 def build_user_graph_data():
     users = glob.glob('./graph/{}/user_graph/edges/*.edgelist'.format(data_name))
     user_count = len(users) + 1
+    max_checkin = 254
     for i in range(1, user_count):
         idx_file = './graph/{}/user_graph/id2idx/'.format(data_name) + str(i) + '_node_id2idx.txt'
         edge_file = './graph/{}/user_graph/edges/'.format(data_name) + str(i) + '_edges.edgelist'
@@ -69,6 +78,11 @@ def build_user_graph_data():
         mmn.fit(gps)
         mmn_all_data = [mmn.transform(d) for d in gps]
         features[:, 3: 5] = torch.FloatTensor(mmn_all_data)
+        checkins = features[:, 2: 3].numpy()
+        mmn = MinMaxNormalization(min_=0, max_=max_checkin)
+        mmn.fit(checkins)
+        mmn_all_data = [mmn.transform(d) for d in checkins]
+        features[:, 2: 3] = torch.FloatTensor(mmn_all_data)
         data = Data(x=features, edge_index=edge_index)
         pickle.dump(data, open('./processed/{}/users/{}_user_graph_data.pkl'.format(data_name, i), 'wb'))
 

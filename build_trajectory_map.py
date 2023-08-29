@@ -17,8 +17,8 @@ def pre_process(data):
     hour_48 = []
     for i in range(len(data)):
         times = data['time'].values[i]
-        timestamp.append(time.mktime(time.strptime(times, '%a %b %d %H:%M:%S %z %Y')))
-        t = datetime.datetime.strptime(times, '%a %b %d %H:%M:%S %z %Y')
+        timestamp.append(time.mktime(time.strptime(times, '%Y-%m-%d %H:%M:%S%z')))
+        t = datetime.datetime.strptime(times, '%Y-%m-%d %H:%M:%S%z')
         year = int(t.strftime('%Y'))
         day_i = int(t.strftime('%j'))
         week_i = int(t.strftime('%w'))
@@ -39,7 +39,7 @@ def pre_process(data):
     data['day'] = day
     data['week'] = week
     data['hour_48'] = hour_48
-    data.sort_values(by='timestamp', inplace=True, ascending=True)
+    data.sort_values(by=['user_id', 'timestamp'], inplace=True, ascending=True)
     #################################################################################
     # 2、filter users and POIs
     data['user_id'] = data['user_id'].rank(method='dense').values
@@ -77,16 +77,24 @@ def build_global_graph(df):
             else:
                 G.nodes[node]['checkin_cnt'] += 1
         # Add Edges
-        pre_row = None
+        previous_poi_id = 0
+        previous_traj_id = 0
         for _, row in user_df.iterrows():
-            if pre_row is None:
+            poi_id = row['poi_id']
+            traj_id = row['trajectory_id']
+            # No edge for the begin of the seq or different traj
+            if (previous_poi_id == 0) or (previous_traj_id != traj_id):
+                previous_poi_id = poi_id
+                previous_traj_id = traj_id
                 pre_row = row
                 continue
-            if row['day'] - pre_row['day'] <= 1:
-                if G.has_edge(pre_row['poi_id'], row['poi_id']):
-                    G.edges[pre_row['poi_id'], row['poi_id']]['weight'] = 1
-                else:  # Add new edge
-                    G.add_edge(pre_row['poi_id'], row['poi_id'], weight=1, distance=math.sqrt(np.square(pre_row['latitude'] - row['latitude']) + np.square(pre_row['longitude'] - row['longitude'])))
+            # Add edges
+            if G.has_edge(previous_poi_id, poi_id):
+                G.edges[previous_poi_id, poi_id]['weight'] += 1
+            else:  # Add new edge
+                G.add_edge(previous_poi_id, poi_id, weight=1, distance=math.sqrt(np.square(pre_row['latitude'] - row['latitude']) + np.square(pre_row['longitude'] - row['longitude'])))
+            previous_traj_id = traj_id
+            previous_poi_id = poi_id
             pre_row = row
     return G
 
@@ -110,18 +118,24 @@ def build_user_all_graph(df):
                            longitude=row['longitude'])
             else:
                 G.nodes[node]['checkin_cnt'] += 1
-        # Add Edges
-        pre_row = None
-        for _, row in user_df.iterrows():
-            if pre_row is None:
-                pre_row = row
+        # Add edges (Check-in seq)
+        previous_poi_id = 0
+        previous_traj_id = 0
+        for i, row in user_df.iterrows():
+            poi_id = row['poi_id']
+            traj_id = row['trajectory_id']
+            # No edge for the begin of the seq or different traj
+            if (previous_poi_id == 0) or (previous_traj_id != traj_id):
+                previous_poi_id = poi_id
+                previous_traj_id = traj_id
                 continue
-            if row['day'] - pre_row['day'] <= 1:
-                if G.has_edge(pre_row['poi_id'], row['poi_id']):
-                    G.edges[pre_row['poi_id'], row['poi_id']]['weight'] = 1
-                else:  # Add new edge
-                    G.add_edge(pre_row['poi_id'], row['poi_id'], weight=1)
-            pre_row = row
+            # Add edges
+            if G.has_edge(previous_poi_id, poi_id):
+                G.edges[previous_poi_id, poi_id]['weight'] += 1
+            else:  # Add new edge
+                G.add_edge(previous_poi_id, poi_id, weight=1)
+            previous_traj_id = traj_id
+            previous_poi_id = poi_id
         graphs.append(G)
     return graphs, users
 
@@ -154,7 +168,6 @@ def save_graph_dist(G):
 
 
 def save_users_graph(graphs, users):
-    print(users)
     for G, user in zip(graphs, users):
         nodelist = G.nodes()
         node_id2idx = {k: v for v, k in enumerate(nodelist)}
@@ -172,16 +185,38 @@ def save_users_graph(graphs, users):
 
 
 def main():
-    data = pd.read_table('./data/dataset_TSMC2014_NYC.txt', encoding='latin-1')
-    data.columns = ["user_id", "poi_id", "cat_id", "cat_name", "latitude", "longitude", "timezone", "time"]
-    data = pre_process(data)
-    data.sort_values(by=['user_id', 'timestamp'], inplace=True)
+    if data_name == 'NYC':
+        data = pd.read_csv('./data/NYC_2012.csv')
+        data = build_trajectory(data)
     global_graph = build_global_graph(data)
     save_graph_to_pickle(global_graph)
     save_graph_edge(global_graph)
     save_graph_dist(global_graph)
     user_all_graph, users = build_user_all_graph(data)
     save_users_graph(user_all_graph, users)
+    data.to_csv('./data/NYC_trajectory.csv', index=False)
+
+
+def build_trajectory(df):
+    df.columns = ["user_id", "poi_id", "cat_id", "cat_name", "latitude", "longitude", "timezone", "time"]
+    df = pre_process(df)
+    df.sort_values(by=['user_id', 'time'], inplace=True, ascending=True)
+    trajectory = []
+    for venueid, group in df.groupby('user_id'):
+        user_id = venueid
+        pre_day = group['day'].iloc[0]
+        trajectory_id = 1
+        for _, u in group.iterrows():
+            now_day = u['day']
+            if now_day == pre_day or now_day == pre_day + 1:
+                trajectory.append(str(user_id) + '_' + str(trajectory_id))
+                pre_day = now_day
+            else:
+                trajectory_id += 1
+                trajectory.append(str(user_id) + '_' + str(trajectory_id))
+                pre_day = now_day
+    df['trajectory_id'] = trajectory
+    return df
 
 
 def mkdirs():

@@ -5,20 +5,22 @@ import pickle
 import random
 import logging
 import argparse
+import numpy as np
 import torch.nn as nn
 from utils import PoiDataset
 import torch.utils.data as data
+from torch.nn.utils.rnn import pad_sequence
 from Model import GlobalGraphNet, GlobalDistNet, UserGraphNet, UserHistoryNet, TransformerModel
 
 
 parser = argparse.ArgumentParser(description='Parameters for my model')
-parser.add_argument('--poi_len', type=int, default=38333, help='The length of POI_id,NYC is 38333, TKY is 61858')
-parser.add_argument('--user_len', type=int, default=1083, help='The length of users')
-parser.add_argument('--cat_len', type=int, default=400, help='The length of category')
-parser.add_argument('--node_len', type=int, default=714, help='The length of user graph node')
+parser.add_argument('--poi_len', type=int, default=5099, help='The length of POI_id,NYC is 5099, TKY is 61858')
+parser.add_argument('--user_len', type=int, default=1075, help='The length of users')
+parser.add_argument('--cat_len', type=int, default=312, help='The length of category')
+parser.add_argument('--node_len', type=int, default=237, help='The length of user graph node')
 parser.add_argument('--global_graph_dim', type=int, default=128, help='The embedding dim of GlobalGraphNet')
 parser.add_argument('--global_dist_dim', type=int, default=128, help='The embedding dim of GlobalDistNet')
-parser.add_argument('--global_dist_features', type=int, default=898, help='The feature sum of global distance graph')
+parser.add_argument('--global_dist_features', type=int, default=544, help='The feature sum of global distance graph')
 parser.add_argument('--user_graph_dim', type=int, default=128, help='The embedding dim of UserGraphNet')
 parser.add_argument('--user_history_dim', type=int, default=128, help='The embedding dim of UserHistoryNet')
 parser.add_argument('--hidden_size', type=int, default=128, help='The hidden size in UserHistoryNet`s LSTM')
@@ -26,26 +28,28 @@ parser.add_argument('--lstm_layers', type=int, default=3, help='The layer of LST
 parser.add_argument('--out_dim', type=int, default=128, help='The dim of previous four model')
 parser.add_argument('--dropout', type=float, default=0.5, help='The dropout rate in Transformer')
 parser.add_argument('--tran_head', type=int, default=4, help='The number of heads in Transformer')
-parser.add_argument('--tran_hid', type=int, default=128, help='The dim in Transformer')
+parser.add_argument('--tran_hid', type=int, default=64, help='The dim in Transformer')
 parser.add_argument('--tran_layers', type=int, default=3, help='The layer of Transformer')
-parser.add_argument('--epochs', type=int, default=150, help='Epochs of train')
+parser.add_argument('--epochs', type=int, default=200, help='Epochs of train')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size of dataloader')
 parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate of optimizer')
 parser.add_argument('--weight_decay', type=float, default=0, help='Weight_decay of optimizer')
+parser.add_argument('--lr_scheduler_factor', type=float, default=0.1, help='The decrease rate of ReduceLROnPlateau')
 parser.add_argument('--data_name', type=str, default='NYC', help='Train data name')
 parser.add_argument('--gpu_num', type=int, default=0, help='Choose which GPU to use')
 parser.add_argument('--test_num', type=str, default='1', help='Just for test')
-parser.add_argument('--seed', type=int, default=666, help='random seed')
+parser.add_argument('--seed', type=int, default=8055, help='random seed')
 
 
 def load_data():
     global train_len, test_len
     train_dataset = PoiDataset(data_name, data_type='train')
-    train_loader = data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x)
     test_dataset = PoiDataset(data_name, data_type='test')
-    test_loader = data.DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = data.DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x)
     train_len = len(train_loader)
     test_len = len(test_loader)
+    print(train_len, test_len)
     return train_loader, test_loader
 
 
@@ -85,113 +89,195 @@ def train():
     user_graph_model.to(device)
     user_history_model.to(device)
     transformer.to(device)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(ignore_index=0)
     optimizer = torch.optim.Adam(list(global_graph_model.parameters()) +
                                  list(global_dist_model.parameters()) +
                                  list(user_graph_model.parameters()) +
                                  list(user_history_model.parameters()) +
                                  list(transformer.parameters())
                                  , lr=lr, weight_decay=weight_decay)
-    stepLR = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
-    train_len = len(train_loader)
-    test_count = 1
+    # stepLR = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+    stepLR = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, 'min', verbose=True, factor=lr_scheduler_factor)
     dist_mask = dist_mask.to(device)
-    for i in range(epochs):
-        precision_1 = 0
-        precision_5 = 0
-        precision_10 = 0
-        precision_15 = 0
-        precision_20 = 0
+    for epoch in range(epochs):
+        train_batches_top1_acc_list = []
+        train_batches_top5_acc_list = []
+        train_batches_top10_acc_list = []
+        train_batches_top15_acc_list = []
+        train_batches_top20_acc_list = []
+        train_batches_mAP20_list = []
+        train_batches_mrr_list = []
+        src_mask = transformer.generate_square_subsequent_mask(batch_size).to(device)
         for _, batch_data in enumerate(train_loader, 1):
+            b_len = len(batch_data)
+            if b_len != batch_size:
+                src_mask = transformer.generate_square_subsequent_mask(b_len).to(device)
             global_graph_model.train()
             global_dist_model.train()
             user_graph_model.train()
             user_history_model.train()
             optimizer.zero_grad()
-            history_feature = batch_data[0].to(device)
-            y = batch_data[1].to(device)
-            user_graph = batch_data[2].to(device)
-            user_graph_edges = batch_data[3].to(device)
+            history_feature, y, trajectory_len, user_graph, user_graph_edges = spilt_batch(batch_data)
+            y = y.to(device)
+            history_feature = history_feature.to(device)
+            user_graph = user_graph.to(device)
+            user_graph_edges = user_graph_edges.to(device)
             global_graph = global_graph.to(device)
             global_dist = global_dist.to(device)
             global_graph_feature = global_graph_model(global_graph)
             global_dist_feature = global_dist_model(global_dist, dist_mask)
             user_graph_feature = user_graph_model(user_graph, user_graph_edges)
             user_history_feature = user_history_model(history_feature)
-            global_graph_feature = global_graph_feature.repeat(y.shape[0], 20, 1)
-            global_dist_feature = global_dist_feature.repeat(y.shape[0], 20, 1)
-            user_graph_feature = user_graph_feature.reshape(y.shape[0], 1, -1).repeat(1, 20, 1)
-            y_pred = transformer(user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature)
+            global_graph_feature = global_graph_feature.repeat(b_len, user_history_feature.shape[1], 1)
+            global_dist_feature = global_dist_feature.repeat(b_len, user_history_feature.shape[1], 1)
+            user_graph_feature = user_graph_feature.reshape(b_len, 1, -1).repeat(1, user_history_feature.shape[1], 1)
+            y_pred = transformer(user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature, src_mask)
             loss = criterion(y_pred.transpose(1, 2), y.long())
-            loss.backward()
-            y_pred = y_pred[:, -1, :]
-            y = y[:, -1]
-            y_pred, indices = torch.sort(y_pred, dim=1, descending=True)
-            precision_1 += cal_precision(indices, y, 1, train_len)
-            precision_5 += cal_precision(indices, y, 5, train_len)
-            precision_10 += cal_precision(indices, y, 10, train_len)
-            precision_15 += cal_precision(indices, y, 15, train_len)
-            precision_20 += cal_precision(indices, y, 20, train_len)
+            loss.backward(retain_graph=True)
+            precision_1 = 0
+            precision_5 = 0
+            precision_10 = 0
+            precision_15 = 0
+            precision_20 = 0
+            mAP20 = 0
+            mrr = 0
+            y_pred = y_pred.detach().cpu().numpy()
+            y = y.detach().cpu().numpy()
+            for predict, true, tra_len in zip(y_pred, y, trajectory_len):
+                true = true[: tra_len]
+                predict = predict[: tra_len, :]
+                precision_1 += top_k_acc_last_timestep(true, predict, k=1)
+                precision_5 += top_k_acc_last_timestep(true, predict, k=5)
+                precision_10 += top_k_acc_last_timestep(true, predict, k=10)
+                precision_15 += top_k_acc_last_timestep(true, predict, k=15)
+                precision_20 += top_k_acc_last_timestep(true, predict, k=20)
+                mAP20 += mAP_metric_last_timestep(true, predict, k=20)
+                mrr += MRR_metric_last_timestep(true, predict)
+            train_batches_top1_acc_list.append(precision_1 / b_len)
+            train_batches_top5_acc_list.append(precision_5 / b_len)
+            train_batches_top10_acc_list.append(precision_10 / b_len)
+            train_batches_top15_acc_list.append(precision_15 / b_len)
+            train_batches_top20_acc_list.append(precision_20 / b_len)
+            train_batches_mAP20_list.append(mAP20 / b_len)
+            train_batches_mrr_list.append(mrr / b_len)
             optimizer.step()
-            sys.stdout.write("\rTRAINDATE:  Epoch:{}\t\t loss:{} res train:{}".format(i, loss.item(), train_len - _))
-        test_model(global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer, test_loader,
+            sys.stdout.write("\rTRAINDATE:  Epoch:{}\t\t loss:{} res train:{}".format(epoch, loss.item(), train_len - _))
+        monitor_loss = test_model(epoch, criterion, global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer, test_loader,
                    global_graph, global_dist, dist_mask)
-        test_count += 1
-        stepLR.step()
+        stepLR.step(monitor_loss)
 
 
-def test_model(global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer, test_loader,
+def test_model(epoch, criterion, global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer, test_loader,
                global_graph, global_dist, dist_mask):
     global_graph_model.eval()
     global_dist_model.eval()
     user_graph_model.eval()
     user_history_model.eval()
     transformer.eval()
-    precision_1 = 0
-    precision_5 = 0
-    precision_10 = 0
-    precision_15 = 0
-    precision_20 = 0
+    test_batches_top1_acc_list = []
+    test_batches_top5_acc_list = []
+    test_batches_top10_acc_list = []
+    test_batches_top15_acc_list = []
+    test_batches_top20_acc_list = []
+    test_batches_mAP20_list = []
+    test_batches_mrr_list = []
+    loss_list = []
     with torch.no_grad():
+        src_mask = transformer.generate_square_subsequent_mask(batch_size).to(device)
         for _, batch_data in enumerate(test_loader):
-            history_feature = batch_data[0].to(device)
-            y = batch_data[1].to(device)
-            user_graph = batch_data[2].to(device)
-            user_graph_edges = batch_data[3].to(device)
+            b_len = len(batch_data)
+            if b_len != batch_size:
+                src_mask = transformer.generate_square_subsequent_mask(b_len).to(device)
+            history_feature, y, trajectory_len, user_graph, user_graph_edges = spilt_batch(batch_data)
+            y = y.to(device)
+            history_feature = history_feature.to(device)
+            user_graph = user_graph.to(device)
+            user_graph_edges = user_graph_edges.to(device)
             global_graph = global_graph.to(device)
             global_dist = global_dist.to(device)
             global_graph_feature = global_graph_model(global_graph)
             global_dist_feature = global_dist_model(global_dist, dist_mask)
             user_graph_feature = user_graph_model(user_graph, user_graph_edges)
             user_history_feature = user_history_model(history_feature)
-            global_graph_feature = global_graph_feature.repeat(y.shape[0], 20, 1)
-            global_dist_feature = global_dist_feature.repeat(y.shape[0], 20, 1)
-            user_graph_feature = user_graph_feature.reshape(y.shape[0], 1, -1).repeat(1, 20, 1)
-            y_pred = transformer(user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature)
-            y_pred = y_pred[:, -1, :]
-            y = y[:, -1]
-            y_pred, indices = torch.sort(y_pred, dim=1, descending=True)
-            precision_1 += cal_precision(indices, y, 1, test_len)
-            precision_5 += cal_precision(indices, y, 5, test_len)
-            precision_10 += cal_precision(indices, y, 10, test_len)
-            precision_15 += cal_precision(indices, y, 15, test_len)
-            precision_20 += cal_precision(indices, y, 20, test_len)
-    print("\rTESTING:  precision_1:{.4f}\t\t precision_5:{.4f}\t\t precision_10:{.4f}\t\t precision_20:{.4f}".format(precision_1,
-          precision_5, precision_10, precision_20))
-    mess = "\rTESTING:  precision_1:{.4f}\t\t precision_5:{.4f}\t\t precision_10:{.4f}\t\t precision_20:{.4f}".format(precision_1,
-           precision_5, precision_10, precision_20)
+            global_graph_feature = global_graph_feature.repeat(y.shape[0], user_history_feature.shape[1], 1)
+            global_dist_feature = global_dist_feature.repeat(y.shape[0], user_history_feature.shape[1], 1)
+            user_graph_feature = user_graph_feature.reshape(y.shape[0], 1, -1).repeat(1, user_history_feature.shape[1], 1)
+            y_pred = transformer(user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature, src_mask)
+            precision_1 = 0
+            precision_5 = 0
+            precision_10 = 0
+            precision_15 = 0
+            precision_20 = 0
+            mAP20 = 0
+            mrr = 0
+            loss = criterion(y_pred.transpose(1, 2), y.long())
+            loss_list.append(loss.detach().cpu().numpy())
+            y_pred = y_pred.detach().cpu().numpy()
+            y = y.detach().cpu().numpy()
+            for predict, true, tra_len in zip(y_pred, y, trajectory_len):
+                true = true[: tra_len]
+                predict = predict[: tra_len, :]
+                precision_1 += top_k_acc_last_timestep(true, predict, k=1)
+                precision_5 += top_k_acc_last_timestep(true, predict, k=5)
+                precision_10 += top_k_acc_last_timestep(true, predict, k=10)
+                precision_15 += top_k_acc_last_timestep(true, predict, k=15)
+                precision_20 += top_k_acc_last_timestep(true, predict, k=20)
+                mAP20 += mAP_metric_last_timestep(true, predict, k=20)
+                mrr += MRR_metric_last_timestep(true, predict)
+            test_batches_top1_acc_list.append(precision_1 / y.shape[0])
+            test_batches_top5_acc_list.append(precision_5 / y.shape[0])
+            test_batches_top10_acc_list.append(precision_10 / y.shape[0])
+            test_batches_top15_acc_list.append(precision_15 / y.shape[0])
+            test_batches_top20_acc_list.append(precision_20 / y.shape[0])
+            test_batches_mAP20_list.append(mAP20 / y.shape[0])
+            test_batches_mrr_list.append(mrr / y.shape[0])
+    mess = ("\rTESTING: Epoch:{}\t\t  precision_1:{}\t\t precision_5:{}\t\t precision_10:{} \t\t precision_15:{} \t\t precision_20:{} "
+            "\t\t mAP20:{} \t\t mrr:{}".format(epoch, np.mean(test_batches_top1_acc_list), np.mean(test_batches_top5_acc_list)
+                                               , np.mean(test_batches_top10_acc_list), np.mean(test_batches_top15_acc_list),
+                                               np.mean(test_batches_top20_acc_list), np.mean(test_batches_mAP20_list),
+                                               np.mean(test_batches_mrr_list)))
+    print(mess)
     logger.info(str(mess))
     if precision_1 > 0.2435:
         save_model(global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer)
+    return np.mean(loss_list)
 
 
-def cal_precision(indices, batch_y, k, count):
-    precision = 0
-    for i in range(indices.size(0)):
-        sort = indices[i]
-        if batch_y[i].long() in sort[:k]:
-            precision += 1
-    return precision / count
+def top_k_acc_last_timestep(y_true_seq, y_pred_seq, k):
+    y_true = y_true_seq[-1]
+    y_pred = y_pred_seq[-1]
+    top_k_rec = y_pred.argsort()[-k:][::-1]
+    idx = np.where(top_k_rec == y_true)[0]
+    if len(idx) != 0:
+        return 1
+    else:
+        return 0
+
+
+def mAP_metric_last_timestep(y_true_seq, y_pred_seq, k):
+    """ next poi metrics """
+    # AP: area under PR curve
+    # But in next POI rec, the number of positive sample is always 1. Precision is not well defined.
+    # Take def of mAP from Personalized Long- and Short-term Preference Learning for Next POI Recommendation
+    y_true = y_true_seq[-1]
+    y_pred = y_pred_seq[-1]
+    rec_list = y_pred.argsort()[-k:][::-1]
+    r_idx = np.where(rec_list == y_true)[0]
+    if len(r_idx) != 0:
+        return 1 / (r_idx[0] + 1)
+    else:
+        return 0
+
+
+def MRR_metric_last_timestep(y_true_seq, y_pred_seq):
+    """ next poi metrics """
+    # Mean Reciprocal Rank: Reciprocal of the rank of the first relevant item
+    y_true = y_true_seq[-1]
+    y_pred = y_pred_seq[-1]
+    rec_list = y_pred.argsort()[-len(y_pred):][::-1]
+    r_idx = np.where(rec_list == y_true)[0][0]
+    return 1 / (r_idx + 1)
 
 
 def save_model(global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer):
@@ -218,6 +304,19 @@ def set_logger():
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
+
+
+def spilt_batch(batch):
+    history_feature, y, trajectory_len, user_graph, user_graph_edges = [], [], [], [], []
+    for i in batch:
+        history_feature.append(i[0])
+        y.append(i[1])
+        trajectory_len.append(i[2])
+        user_graph.append(i[3])
+        user_graph_edges.append(i[4])
+    history_feature = pad_sequence(history_feature, batch_first=True, padding_value=0)
+    y = pad_sequence(y, batch_first=True, padding_value=0)
+    return history_feature, y, trajectory_len, torch.stack(user_graph), torch.stack(user_graph_edges)
 
 
 if __name__ == '__main__':
@@ -259,9 +358,11 @@ if __name__ == '__main__':
     lr = args.lr
     batch_size = args.batch_size
     weight_decay = args.weight_decay
+    lr_scheduler_factor = args.lr_scheduler_factor
     epochs = args.epochs
     data_name = args.data_name
     print(args)
+    # ----------------------------------------------------------------------------- #
     logger = logging.getLogger(__name__)
     set_logger()
     logger.info(str(args))

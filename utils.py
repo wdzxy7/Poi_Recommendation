@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.utils.data as data
-from build_trajectory_map import pre_process
 
 
 class MinMaxNormalization(object):
@@ -52,20 +51,29 @@ class PoiDataset(data.Dataset):
             self.user_graph_path = './processed/TKY/users'
         with open(poi_data_path + '{}_data.pkl'.format(data_type), 'rb') as f:
             self.user_poi_data = pickle.load(f)
-        self.user_poi_data = torch.tensor(self.user_poi_data).float()
+        self.poi_data = []
+        self.trajectory_len = []
+        self.convert_tensor()
         self.user_graph_dict = {}
         self.load_user_graph()
         self.pad_graph()
-        self.data_len = len(self.user_poi_data)
+        self.data_len = len(self.poi_data)
 
     def __getitem__(self, index):
-        x = self.user_poi_data[index, :-1]
-        y = self.user_poi_data[index, 1:, 1]
-        graph = self.user_graph_dict[int(x[0, 0])]
-        return x, y, graph.x, graph.edge_index
+        x = self.poi_data[index][:-1]
+        y = self.poi_data[index][1:][:, 1] - 1
+        graph = self.user_graph_dict[int(x[0][0])]
+        return x, y, self.trajectory_len[index], graph.x, graph.edge_index
 
     def __len__(self):
         return self.data_len
+
+    def convert_tensor(self):
+        for line in self.user_poi_data:
+            t_vec = self.timestamp2vec(line[:, -1])
+            line = np.hstack((line[:, :-1], t_vec))
+            self.poi_data.append(torch.Tensor(line))
+            self.trajectory_len.append(len(line) - 1)
 
     def pad_graph(self):
         for key in self.user_graph_dict.keys():
@@ -87,37 +95,61 @@ class PoiDataset(data.Dataset):
                 if self.user_graph_dict[user].edge_index.shape[1] > self.max_graph_edges:
                     self.max_graph_edges = self.user_graph_dict[user].edge_index.shape[1]
 
+    def timestamp2vec(self, days):
+        ret = []
+        for day in days:
+            vec = []
+            day = int(day)
+            if day == 0:
+                day = 7
+            for i in range(7 - day):
+                vec.append(0)
+            vec.append(1)
+            for i in range(day - 1):
+                vec.append(0)
+            ret.append(vec)
+        return np.asarray(ret)
 
-def spilt_data(data_name, current_len=20, rate=0.8):
-    if data_name == 'NYC':
-        data_path = './data/dataset_TSMC2014_NYC.txt'
-    elif data_name == 'TKY':
-        data_path = './data/dataset_TSMC2014_TKY.txt'
-    df = pd.read_table(data_path, encoding='latin-1')
-    df.columns = ["user_id", "poi_id", "cat_id", "cat_name", "latitude", "longitude", "timezone", "time"]
-    df = pre_process(df)
-    df.drop(['cat_name', 'time', 'timezone'], axis=1, inplace=True)
+
+def normal_data(df):
     mmn = MinMaxNormalization()
     arr = np.array(df[['latitude', 'longitude']])
     mmn.fit(arr)
     mmn_all_data = [mmn.transform(d) for d in arr]
     df[['latitude', 'longitude']] = mmn_all_data
+    mmn = MinMaxNormalization(min_=94, max_=411)
+    arr = np.array(df[['day']])
+    mmn.fit(arr)
+    mmn_all_data = [mmn.transform(d) for d in arr]
+    df[['day']] = mmn_all_data
+    df[['hour']] /= 23
+    return df
+
+
+def spilt_data(data_name, rate=0.8):
+    if data_name == 'NYC':
+        data_path = './data/NYC_trajectory.csv'
+    elif data_name == 'TKY':
+        data_path = './data/dataset_TSMC2014_TKY.txt'
+    df = pd.read_csv(data_path)
+    print(len(set(df['poi_id'])), len(set(df['user_id'])), len(set(df['cat_id'])))
+    df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'timestamp'], axis=1, inplace=True)
+    df = normal_data(df)
     train_data = []
     test_data = []
     for _, group in df.groupby('user_id'):
-        max_len = group.shape[0]
-        front = 0
-        back = current_len + 1
-        user_dataset = []
-        while back <= max_len:
-            slice_data = group[front: back]
-            front += 1
-            back += 1
-            user_dataset.append(slice_data)
-        train_len = int(len(user_dataset) * rate)
-        test_len = len(user_dataset) - train_len
-        train = user_dataset[: train_len]
-        test = user_dataset[-test_len:]
+        trajectory_len = len(set(group['trajectory_id']))
+        train_len = int(trajectory_len * rate)
+        if train_len == 0:
+            train_len = trajectory_len
+        train = []
+        test = []
+        for _, tra_group in group.groupby('trajectory_id'):
+            if train_len > 0:
+                train.append(np.array(tra_group.drop(['trajectory_id'], axis=1)))
+                train_len -= 1
+            else:
+                test.append(np.array(tra_group.drop(['trajectory_id'], axis=1)))
         train_data += train
         test_data += test
     if not os.path.exists('./processed/{}/poi_data'.format(data_name)):
@@ -129,5 +161,8 @@ def spilt_data(data_name, current_len=20, rate=0.8):
 
 
 if __name__ == '__main__':
-    spilt_data('NYC')
-    data = PoiDataset('NYC', 'train')
+    # spilt_data('NYC', rate=0.9)
+    dataset = PoiDataset('NYC', 'train')
+    train_loader = data.DataLoader(dataset=dataset, batch_size=32, shuffle=False, collate_fn=lambda x: x)
+    for _, batch_data in enumerate(train_loader, 1):
+        print(1)
