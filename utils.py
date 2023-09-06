@@ -61,7 +61,7 @@ class PoiDataset(data.Dataset):
 
     def __getitem__(self, index):
         x = self.poi_data[index][:-1]
-        y = self.poi_data[index][1:][:, 1] - 1
+        y = self.poi_data[index][1:][:, 1]
         graph = self.user_graph_dict[int(x[0][0])]
         return x, y, self.trajectory_len[index], graph.x, graph.edge_index
 
@@ -69,9 +69,14 @@ class PoiDataset(data.Dataset):
         return self.data_len
 
     def convert_tensor(self):
+        '''
         for line in self.user_poi_data:
             t_vec = self.timestamp2vec(line[:, -1])
             line = np.hstack((line[:, :-1], t_vec))
+            self.poi_data.append(torch.Tensor(line))
+            self.trajectory_len.append(len(line) - 1)
+        '''
+        for line in self.user_poi_data:
             self.poi_data.append(torch.Tensor(line))
             self.trajectory_len.append(len(line) - 1)
 
@@ -122,7 +127,6 @@ def normal_data(df):
     mmn.fit(arr)
     mmn_all_data = [mmn.transform(d) for d in arr]
     df[['day']] = mmn_all_data
-    df[['hour']] /= 23
     return df
 
 
@@ -133,8 +137,8 @@ def spilt_data(data_name, rate=0.8):
         data_path = './data/dataset_TSMC2014_TKY.txt'
     df = pd.read_csv(data_path)
     print(len(set(df['poi_id'])), len(set(df['user_id'])), len(set(df['cat_id'])))
-    df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'timestamp'], axis=1, inplace=True)
     df = normal_data(df)
+    df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'timestamp', 'day'], axis=1, inplace=True)
     train_data = []
     test_data = []
     for _, group in df.groupby('user_id'):
@@ -161,7 +165,7 @@ def spilt_data(data_name, rate=0.8):
 
 
 if __name__ == '__main__':
-    # spilt_data('NYC', rate=0.9)
+    spilt_data('NYC', rate=0.9)
     dataset = PoiDataset('NYC', 'train')
     train_loader = data.DataLoader(dataset=dataset, batch_size=32, shuffle=False, collate_fn=lambda x: x)
     for _, batch_data in enumerate(train_loader, 1):
