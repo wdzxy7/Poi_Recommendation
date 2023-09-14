@@ -11,6 +11,7 @@ from utils import PoiDataset
 import torch.utils.data as data
 from torch.nn.utils.rnn import pad_sequence
 from Model import GlobalGraphNet, GlobalDistNet, UserGraphNet, UserHistoryNet, TransformerModel
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
 parser = argparse.ArgumentParser(description='Parameters for my model')
@@ -19,9 +20,9 @@ parser.add_argument('--user_len', type=int, default=1075, help='The length of us
 parser.add_argument('--cat_len', type=int, default=312, help='The length of category')
 parser.add_argument('--node_len', type=int, default=237, help='The length of user graph node')
 parser.add_argument('--cat_dim', type=int, default=100, help='The embedding dim of poi category')
-parser.add_argument('--user_dim', type=int, default=20, help='The embedding dim of poi users')
-parser.add_argument('--poi_dim', type=int, default=300, help='The embedding dim of pois')
-parser.add_argument('--gcn_channel', type=int, default=128, help='The channels in GCN')
+parser.add_argument('--user_dim', type=int, default=50, help='The embedding dim of poi users')
+parser.add_argument('--poi_dim', type=int, default=400, help='The embedding dim of pois')
+parser.add_argument('--gcn_channel', type=int, default=64, help='The channels in GCN')
 parser.add_argument('--global_graph_layers', type=int, default=5, help='The gcn layers in GlobalGraphNet')
 parser.add_argument('--global_dist_features', type=int, default=544, help='The feature sum of global distance graph')
 parser.add_argument('--global_dist_layers', type=int, default=4, help='The gcn layers in GlobalDistNet')
@@ -35,7 +36,7 @@ parser.add_argument('--lstm_layers', type=int, default=3, help='The layer of LST
 parser.add_argument('--hid_dim', type=int, default=128, help='The dim of previous four model')
 parser.add_argument('--dropout', type=float, default=0.5, help='The dropout rate in Transformer')
 parser.add_argument('--tran_head', type=int, default=4, help='The number of heads in Transformer')
-parser.add_argument('--tran_hid', type=int, default=64, help='The dim in Transformer')
+parser.add_argument('--tran_hid', type=int, default=128, help='The dim in Transformer')
 parser.add_argument('--tran_layers', type=int, default=3, help='The layer of Transformer')
 parser.add_argument('--epochs', type=int, default=200, help='Epochs of train')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size of dataloader')
@@ -43,9 +44,8 @@ parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate of opt
 parser.add_argument('--weight_decay', type=float, default=0, help='Weight_decay of optimizer')
 parser.add_argument('--lr_scheduler_factor', type=float, default=0.1, help='The decrease rate of ReduceLROnPlateau')
 parser.add_argument('--data_name', type=str, default='NYC', help='Train data name')
-parser.add_argument('--gpu_num', type=int, default=1, help='Choose which GPU to use')
-parser.add_argument('--test_num', type=str, default='2', help='Just for test')
-parser.add_argument('--seed', type=int, default=666, help='random seed')
+parser.add_argument('--gpu_num', type=int, default=0, help='Choose which GPU to use')
+parser.add_argument('--seed', type=int, default=1000, help='random seed')
 
 
 def load_data():
@@ -65,7 +65,11 @@ def load_global_graph():
         graph_data = pickle.load(f)
     with open('./processed/{}/global_dist_data.pkl'.format(data_name), 'rb') as f:
         dist_data = pickle.load(f)
-    return graph_data, dist_data
+    with open('./processed/{}/global_graph_weight_data.pkl'.format(data_name), 'rb') as f:
+        graph_weight_data = pickle.load(f)
+    with open('./processed/{}/global_dist_weight_data.pkl'.format(data_name), 'rb') as f:
+        dist_weight_data = pickle.load(f)
+    return graph_data, graph_weight_data.float(), dist_data, dist_weight_data.float()
 
 
 def get_dist_mask(global_dist):
@@ -80,11 +84,11 @@ def get_dist_mask(global_dist):
 
 def train():
     train_loader, test_loader = load_data()
-    global_graph, global_dist = load_global_graph()
+    global_graph, global_graph_weight, global_dist, global_dist_weight = load_global_graph()
     dist_mask = get_dist_mask(global_dist)
     global_graph_model = GlobalGraphNet(cat_len=cat_len + 1, poi_len=poi_len + 1, cat_dim=cat_dim, poi_dim=poi_dim,
                                         gcn_channel=gcn_channel, gcn_layers=global_graph_layers)
-    global_dist_model = GlobalDistNet(cat_dim=poi_dim, poi_len=poi_len + 1, graph_features=global_dist_features,
+    global_dist_model = GlobalDistNet(poi_dim=poi_dim, poi_len=poi_len + 1, graph_features=global_dist_features,
                                       gcn_layers=global_dist_layers)
     user_graph_model = UserGraphNet(cat_len=cat_len + 1, poi_len=poi_len + 1, node_len=node_len, cat_dim=cat_dim, poi_dim=poi_dim,
                                     gcn_channel=gcn_channel, gcn_layers=user_graph_layers)
@@ -104,9 +108,8 @@ def train():
                                  list(user_history_model.parameters()) +
                                  list(transformer.parameters())
                                  , lr=lr, weight_decay=weight_decay)
-    # stepLR = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
-    stepLR = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, 'min', verbose=True, factor=lr_scheduler_factor)
+    stepLR = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+    # stepLR = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True, factor=lr_scheduler_factor)
     dist_mask = dist_mask.to(device)
     for epoch in range(epochs):
         train_batches_top1_acc_list = []
@@ -126,17 +129,21 @@ def train():
             user_graph_model.train()
             user_history_model.train()
             optimizer.zero_grad()
-            history_feature, y, trajectory_len, user_graph, user_graph_edges = spilt_batch(batch_data)
+            history_feature, y, past, trajectory_len, user_graph, user_graph_edges, user_graph_weight = spilt_batch(batch_data)
             y = y.to(device)
             history_feature = history_feature.to(device)
+            past = past.to(device)
             user_graph = user_graph.to(device)
             user_graph_edges = user_graph_edges.to(device)
             global_graph = global_graph.to(device)
+            global_graph_weight = global_graph_weight.to(device)
             global_dist = global_dist.to(device)
-            global_graph_feature = global_graph_model(global_graph)
-            global_dist_feature = global_dist_model(global_dist, dist_mask)
-            user_graph_feature = user_graph_model(user_graph, user_graph_edges)
-            user_history_feature = user_history_model(history_feature)
+            global_dist_weight = global_dist_weight.to(device)
+            user_graph_weight = user_graph_weight.to(device)
+            global_graph_feature = global_graph_model(global_graph, global_graph_weight)
+            global_dist_feature = global_dist_model(global_dist, dist_mask, global_dist_weight)
+            user_graph_feature = user_graph_model(user_graph, user_graph_edges, user_graph_weight)
+            user_history_feature = user_history_model(history_feature, past)
             global_graph_feature = global_graph_feature.repeat(b_len, user_history_feature.shape[1], 1)
             global_dist_feature = global_dist_feature.repeat(b_len, user_history_feature.shape[1], 1)
             user_graph_feature = user_graph_feature.reshape(b_len, 1, -1).repeat(1, user_history_feature.shape[1], 1)
@@ -170,14 +177,15 @@ def train():
             train_batches_mAP20_list.append(mAP20 / b_len)
             train_batches_mrr_list.append(mrr / b_len)
             optimizer.step()
-            sys.stdout.write("\rTRAINDATE:  Epoch:{}\t\t loss:{} res train:{}".format(epoch, loss.item(), train_len - _))
+            # sys.stdout.write("\rTRAINDATE:  Epoch:{}\t\t loss:{} res train:{}".format(epoch, loss.item(), train_len - _))
         monitor_loss = test_model(epoch, criterion, global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer, test_loader,
-                   global_graph, global_dist, dist_mask)
-        stepLR.step(monitor_loss)
+                   global_graph, global_graph_weight, global_dist, global_dist_weight, dist_mask)
+        # stepLR.step(monitor_loss)
+        stepLR.step()
 
 
 def test_model(epoch, criterion, global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer, test_loader,
-               global_graph, global_dist, dist_mask):
+               global_graph, global_graph_weight, global_dist, global_dist_weight, dist_mask):
     global_graph_model.eval()
     global_dist_model.eval()
     user_graph_model.eval()
@@ -197,17 +205,17 @@ def test_model(epoch, criterion, global_graph_model, global_dist_model, user_gra
             b_len = len(batch_data)
             if b_len != batch_size:
                 src_mask = transformer.generate_square_subsequent_mask(b_len).to(device)
-            history_feature, y, trajectory_len, user_graph, user_graph_edges = spilt_batch(batch_data)
+            history_feature, y, past, trajectory_len, user_graph, user_graph_edges, user_graph_weight = spilt_batch(batch_data)
             y = y.to(device)
             history_feature = history_feature.to(device)
+            past = past.to(device)
             user_graph = user_graph.to(device)
             user_graph_edges = user_graph_edges.to(device)
-            global_graph = global_graph.to(device)
-            global_dist = global_dist.to(device)
-            global_graph_feature = global_graph_model(global_graph)
-            global_dist_feature = global_dist_model(global_dist, dist_mask)
-            user_graph_feature = user_graph_model(user_graph, user_graph_edges)
-            user_history_feature = user_history_model(history_feature)
+            user_graph_weight = user_graph_weight.to(device)
+            global_graph_feature = global_graph_model(global_graph, global_graph_weight)
+            global_dist_feature = global_dist_model(global_dist, dist_mask, global_dist_weight)
+            user_graph_feature = user_graph_model(user_graph, user_graph_edges, user_graph_weight)
+            user_history_feature = user_history_model(history_feature, past)
             global_graph_feature = global_graph_feature.repeat(y.shape[0], user_history_feature.shape[1], 1)
             global_dist_feature = global_dist_feature.repeat(y.shape[0], user_history_feature.shape[1], 1)
             user_graph_feature = user_graph_feature.reshape(y.shape[0], 1, -1).repeat(1, user_history_feature.shape[1], 1)
@@ -247,7 +255,7 @@ def test_model(epoch, criterion, global_graph_model, global_dist_model, user_gra
                                                np.mean(test_batches_mrr_list)))
     print(mess)
     logger.info(str(mess))
-    if precision_1 > 0.2435:
+    if precision_20 > 0.6900:
         save_model(global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer)
     return np.mean(loss_list)
 
@@ -315,16 +323,20 @@ def set_logger():
 
 
 def spilt_batch(batch):
-    history_feature, y, trajectory_len, user_graph, user_graph_edges = [], [], [], [], []
+    history_feature, y, past, trajectory_len, user_graph, user_graph_edges, user_graph_weight = [], [], [], [], [], [], []
     for i in batch:
         history_feature.append(i[0])
         y.append(i[1])
-        trajectory_len.append(i[2])
-        user_graph.append(i[3])
-        user_graph_edges.append(i[4])
+        past.append(i[2])
+        trajectory_len.append(i[3])
+        user_graph.append(i[4])
+        user_graph_edges.append(i[5])
+        user_graph_weight.append(i[6])
     history_feature = pad_sequence(history_feature, batch_first=True, padding_value=0)
+    past = pad_sequence(past, batch_first=True, padding_value=0)
     y = pad_sequence(y, batch_first=True, padding_value=0)
-    return history_feature, y, trajectory_len, torch.stack(user_graph), torch.stack(user_graph_edges)
+    user_graph_weight = pad_sequence(user_graph_weight, batch_first=True, padding_value=0)
+    return history_feature, y, past, trajectory_len, torch.stack(user_graph), torch.stack(user_graph_edges), user_graph_weight
 
 
 if __name__ == '__main__':
@@ -332,8 +344,8 @@ if __name__ == '__main__':
     test_len = 0
     log_save = 'run_{}_log_{}.log'
     args = parser.parse_args()
-    test_num = args.test_num
-    test_key = 'test' + test_num
+    test_num = args.gpu_num
+    test_key = 'test' + str(test_num)
     #  global parameters
     seed = args.seed
     gpu_num = args.gpu_num
