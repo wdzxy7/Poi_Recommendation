@@ -15,22 +15,29 @@ os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
 parser = argparse.ArgumentParser(description='Parameters for my model')
-parser.add_argument('--poi_len', type=int, default=5099, help='The length of POI_id,NYC is 5099, TKY is 61858')
-parser.add_argument('--user_len', type=int, default=1075, help='The length of users')
-parser.add_argument('--cat_len', type=int, default=312, help='The length of category')
-parser.add_argument('--node_len', type=int, default=237, help='The length of user graph node')
+parser.add_argument('--poi_len', type=int, default=4672, help='The length of POI_id,NYC is 5099, TKY is 61858')
+parser.add_argument('--user_len', type=int, default=721, help='The length of users')
+parser.add_argument('--cat_len', type=int, default=307, help='The length of category')
+parser.add_argument('--node_len', type=int, default=223, help='The length of user graph node(debug to see)')
+parser.add_argument('--lat_len', type=int, default=4672, help='The length of gps')
+parser.add_argument('--long_len', type=int, default=4672, help='The length of gps')
+
 parser.add_argument('--cat_dim', type=int, default=100, help='The embedding dim of poi category')
 parser.add_argument('--user_dim', type=int, default=50, help='The embedding dim of poi users')
-parser.add_argument('--poi_dim', type=int, default=400, help='The embedding dim of pois')
-parser.add_argument('--gcn_channel', type=int, default=64, help='The channels in GCN')
+parser.add_argument('--poi_dim', type=int, default=300, help='The embedding dim of pois')
+parser.add_argument('--gps_dim', type=int, default=100, help='The embedding dim of gps')
+parser.add_argument('--gcn_channel', type=int, default=128, help='The channels in GCN')
+
+parser.add_argument('--graph_out_dim', type=int, default=1024, help='The embedding dim of three graph Conv')
 parser.add_argument('--global_graph_layers', type=int, default=5, help='The gcn layers in GlobalGraphNet')
-parser.add_argument('--global_dist_features', type=int, default=544, help='The feature sum of global distance graph')
+parser.add_argument('--global_dist_features', type=int, default=326, help='The feature sum of global distance graph(debug to see)')
 parser.add_argument('--global_dist_layers', type=int, default=4, help='The gcn layers in GlobalDistNet')
 parser.add_argument('--user_graph_layers', type=int, default=3, help='The gcn layers in UserGraphNet')
 parser.add_argument('--embed_size_user', type=int, default=50, help='The embedding dim of embed_size_user in UserHistoryNet')
 parser.add_argument('--embed_size_poi', type=int, default=300, help='The embedding dim of embed_size_poi in UserHistoryNet')
 parser.add_argument('--embed_size_cat', type=int, default=100, help='The embedding dim of embed_size_cat in UserHistoryNet')
 parser.add_argument('--embed_size_hour', type=int, default=20, help='The embedding dim of embed_size_hour in UserHistoryNet')
+parser.add_argument('--history_out_dim', type=int, default=1024, help='The embedding dim of GRU in UserHistoryNet')
 parser.add_argument('--hidden_size', type=int, default=128, help='The hidden size in UserHistoryNet`s LSTM')
 parser.add_argument('--lstm_layers', type=int, default=3, help='The layer of LSTM model in UserHistoryNet')
 parser.add_argument('--hid_dim', type=int, default=128, help='The dim of previous four model')
@@ -44,7 +51,7 @@ parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate of opt
 parser.add_argument('--weight_decay', type=float, default=0, help='Weight_decay of optimizer')
 parser.add_argument('--lr_scheduler_factor', type=float, default=0.1, help='The decrease rate of ReduceLROnPlateau')
 parser.add_argument('--data_name', type=str, default='NYC', help='Train data name')
-parser.add_argument('--gpu_num', type=int, default=0, help='Choose which GPU to use')
+parser.add_argument('--gpu_num', type=int, default=2, help='Choose which GPU to use')
 parser.add_argument('--seed', type=int, default=1000, help='random seed')
 
 
@@ -86,16 +93,18 @@ def train():
     train_loader, test_loader = load_data()
     global_graph, global_graph_weight, global_dist, global_dist_weight = load_global_graph()
     dist_mask = get_dist_mask(global_dist)
-    global_graph_model = GlobalGraphNet(cat_len=cat_len + 1, poi_len=poi_len + 1, cat_dim=cat_dim, poi_dim=poi_dim,
-                                        gcn_channel=gcn_channel, gcn_layers=global_graph_layers)
-    global_dist_model = GlobalDistNet(poi_dim=poi_dim, poi_len=poi_len + 1, graph_features=global_dist_features,
-                                      gcn_layers=global_dist_layers)
+    global_graph_model = GlobalGraphNet(cat_len=cat_len + 1, poi_len=poi_len + 1, cat_dim=cat_dim, poi_dim=poi_dim, gps_dim=gps_dim,
+                                        gcn_channel=gcn_channel, gcn_layers=global_graph_layers, graph_out_dim=graph_out_dim,
+                                        lat_len=lat_len, long_len=long_len)
+    global_dist_model = GlobalDistNet(poi_dim=poi_dim // 2, poi_len=poi_len + 1, graph_features=global_dist_features,
+                                      gcn_layers=global_dist_layers, graph_out_dim=graph_out_dim)
     user_graph_model = UserGraphNet(cat_len=cat_len + 1, poi_len=poi_len + 1, node_len=node_len, cat_dim=cat_dim, poi_dim=poi_dim,
-                                    gcn_channel=gcn_channel, gcn_layers=user_graph_layers)
+                                    gps_dim=gps_dim, gcn_channel=gcn_channel, gcn_layers=user_graph_layers, graph_out_dim=graph_out_dim,
+                                    lat_len=lat_len, long_len=long_len)
     user_history_model = UserHistoryNet(cat_len=cat_len + 1, poi_len=poi_len + 1, user_len=user_len + 1, embed_size_user=embed_size_user,
                                         embed_size_poi=embed_size_poi, embed_size_cat=embed_size_cat, embed_size_hour=embed_size_hour,
-                                        hidden_size=hid_dim, lstm_layers=lstm_layers)
-    transformer = TransformerModel(embed_dim=5100, dropout=dropout, tran_head=tran_head, tran_hid=tran_hid, tran_layers=tran_layers, poi_len=poi_len + 1)
+                                        hidden_size=hid_dim, lstm_layers=lstm_layers, history_out_dim=poi_len + 1)
+    transformer = TransformerModel(embed_dim=1024, dropout=dropout, tran_head=tran_head, tran_hid=tran_hid, tran_layers=tran_layers, poi_len=poi_len + 1)
     global_graph_model.to(device)
     global_dist_model.to(device)
     user_graph_model.to(device)
@@ -177,7 +186,7 @@ def train():
             train_batches_mAP20_list.append(mAP20 / b_len)
             train_batches_mrr_list.append(mrr / b_len)
             optimizer.step()
-            # sys.stdout.write("\rTRAINDATE:  Epoch:{}\t\t loss:{} res train:{}".format(epoch, loss.item(), train_len - _))
+            sys.stdout.write("\rTRAINDATE:  Epoch:{}\t\t loss:{} res train:{}".format(epoch, loss.item(), train_len - _))
         monitor_loss = test_model(epoch, criterion, global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer, test_loader,
                    global_graph, global_graph_weight, global_dist, global_dist_weight, dist_mask)
         # stepLR.step(monitor_loss)
@@ -361,6 +370,11 @@ if __name__ == '__main__':
     poi_dim = args.poi_dim
     user_dim = args.user_dim
     gcn_channel = args.gcn_channel
+    graph_out_dim = args.graph_out_dim
+    history_out_dim = args.history_out_dim
+    gps_dim = args.gps_dim
+    lat_len = args.lat_len
+    long_len = args.long_len
     # GlobalGraphNet
     global_graph_layers = args.global_graph_layers
     # GlobalDistNet

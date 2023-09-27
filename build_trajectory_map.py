@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 from tqdm import tqdm
+from pandas import DataFrame
 
 
 def pre_process(data):
@@ -15,10 +16,11 @@ def pre_process(data):
     day = []
     week = []
     hour_48 = []
+    deal_time = []
     for i in range(len(data)):
         times = data['time'].values[i]
-        timestamp.append(time.mktime(time.strptime(times, '%Y-%m-%d %H:%M:%S%z')))
-        t = datetime.datetime.strptime(times, '%Y-%m-%d %H:%M:%S%z')
+        timestamp.append(time.mktime(time.strptime(times, '%a %b %d %H:%M:%S %z %Y')))
+        t = datetime.datetime.strptime(times, '%a %b %d %H:%M:%S %z %Y')
         year = int(t.strftime('%Y'))
         day_i = int(t.strftime('%j'))
         week_i = int(t.strftime('%w'))
@@ -26,19 +28,20 @@ def pre_process(data):
         hour_i_48 = hour_i
         if week_i == 0 or week_i == 6:
             hour_i_48 = hour_i + 24
-
         if year == 2013:
             day_i = day_i + 366
         day.append(day_i)
         hour.append(hour_i)
         hour_48.append(int(hour_i_48))
         week.append(week_i)
+        deal_time.append(t)
 
     data['timestamp'] = timestamp
     data['hour'] = hour
     data['day'] = day
     data['week'] = week
     data['hour_48'] = hour_48
+    data['time'] = deal_time
     data.sort_values(by=['user_id', 'timestamp'], inplace=True, ascending=True)
     #################################################################################
     # 2、filter users and POIs
@@ -186,15 +189,20 @@ def save_users_graph(graphs, users):
 
 def main():
     if data_name == 'NYC':
-        data = pd.read_csv('./data/NYC_2012.csv')
+        data = pd.read_table('./data/dataset_TSMC2014_NYC.txt', header=None, encoding="latin-1")
         data = build_trajectory(data)
+    if data_name == 'TKY':
+        data = pd.read_table('./data/dataset_TSMC2014_TKY.txt', header=None, encoding="latin-1")
+        data = build_trajectory(data)
+    print(len(set(data['poi_id'])), len(set(data['user_id'])), len(set(data['cat_id'])), len(data))
+    data = filter_data(data)
+    print(len(set(data['poi_id'])), len(set(data['user_id'])), len(set(data['cat_id'])), len(data))
     global_graph = build_global_graph(data)
     save_graph_to_pickle(global_graph)
     save_graph_edge(global_graph)
     save_graph_dist(global_graph)
     user_all_graph, users = build_user_all_graph(data)
     save_users_graph(user_all_graph, users)
-    data.to_csv('./data/NYC_trajectory.csv', index=False)
 
 
 def build_trajectory(df):
@@ -204,19 +212,47 @@ def build_trajectory(df):
     trajectory = []
     for venueid, group in df.groupby('user_id'):
         user_id = venueid
-        pre_day = group['day'].iloc[0]
+        start_time = group['time'].iloc[0]
         trajectory_id = 1
         for _, u in group.iterrows():
-            now_day = u['day']
-            if now_day == pre_day or now_day == pre_day + 1:
+            now_time = u['time']
+            if now_time- pd.Timedelta(10, "H") <= start_time:
                 trajectory.append(str(user_id) + '_' + str(trajectory_id))
-                pre_day = now_day
             else:
                 trajectory_id += 1
                 trajectory.append(str(user_id) + '_' + str(trajectory_id))
-                pre_day = now_day
+                start_time = now_time
     df['trajectory_id'] = trajectory
     return df
+
+
+def filter_data(data):
+    for poi_id, group in data.groupby('poi_id'):
+        if group.shape[0] < 10:
+            data.drop(data[(data.poi_id == poi_id)].index, inplace=True)
+    for user_id, group in data.groupby('user_id'):
+        if group.shape[0] < 50:
+            data.drop(data[(data.user_id == user_id)].index, inplace=True)
+    for group_id, group in data.groupby('trajectory_id'):
+        if group.shape[0] < 3:
+            data.drop(data[(data.trajectory_id == group_id)].index, inplace=True)
+    for user_id, group in data.groupby('user_id'):
+        if len(set(group.trajectory_id)) < 3:
+            data.drop(data[(data.user_id == user_id)].index, inplace=True)
+    # resort
+    data['user_id'] = data['user_id'].rank(method='dense').values
+    data['user_id'] = data['user_id'].astype(int)
+    data['poi_id'] = data['poi_id'].rank(method='dense').values
+    data['poi_id'] = data['poi_id'].astype(int)
+    for venueid, group in data.groupby('poi_id'):
+        indexs = group.index
+        if len(set(group['cat_id'].values)) > 1:
+            for i in range(len(group)):
+                data.loc[indexs[i], 'cat_id'] = group.loc[indexs[0]]['cat_id']
+    data = data.drop_duplicates()
+    data['cat_id'] = data['cat_id'].rank(method='dense').values
+    data['cat_id'] = data['cat_id'].astype(int)
+    return data
 
 
 def mkdirs():

@@ -1,3 +1,4 @@
+import re
 import os
 import glob
 import torch
@@ -6,6 +7,7 @@ import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.utils.data as data
+from build_trajectory_map import pre_process, filter_data, build_trajectory
 
 
 class MinMaxNormalization(object):
@@ -43,6 +45,7 @@ class PoiDataset(data.Dataset):
         self.data_name = data_name
         self.max_graph_node = 0
         self.max_graph_edges = 0
+        self.max_graph_weight_len = 0
         if data_name == 'NYC':
             poi_data_path = './processed/NYC/poi_data/'
             self.user_graph_path = './processed/NYC/users'
@@ -51,19 +54,25 @@ class PoiDataset(data.Dataset):
             self.user_graph_path = './processed/TKY/users'
         with open(poi_data_path + '{}_data.pkl'.format(data_type), 'rb') as f:
             self.user_poi_data = pickle.load(f)
+        with open(poi_data_path + '{}_past_data.pkl'.format(data_type), 'rb') as f:
+            self.user_past_data = pickle.load(f)
         self.poi_data = []
+        self.past_data = []
         self.trajectory_len = []
         self.convert_tensor()
         self.user_graph_dict = {}
+        self.user_graph_weight_dict = {}
         self.load_user_graph()
         self.pad_graph()
         self.data_len = len(self.poi_data)
 
     def __getitem__(self, index):
         x = self.poi_data[index][:-1]
+        past = self.past_data[index]
         y = self.poi_data[index][1:][:, 1]
         graph = self.user_graph_dict[int(x[0][0])]
-        return x, y, self.trajectory_len[index], graph.x, graph.edge_index
+        weight = self.user_graph_weight_dict[int(x[0][0])]
+        return x, y, past, self.trajectory_len[index], graph.x, graph.edge_index, weight
 
     def __len__(self):
         return self.data_len
@@ -76,29 +85,41 @@ class PoiDataset(data.Dataset):
             self.poi_data.append(torch.Tensor(line))
             self.trajectory_len.append(len(line) - 1)
         '''
-        for line in self.user_poi_data:
+        for line, past in zip(self.user_poi_data, self.user_past_data):
             self.poi_data.append(torch.Tensor(line))
+            self.past_data.append(torch.Tensor(past))
             self.trajectory_len.append(len(line) - 1)
 
     def pad_graph(self):
         for key in self.user_graph_dict.keys():
+            #  padding nodes
             nodes = self.user_graph_dict[key].x.shape[0]
             pad = nn.ZeroPad2d(padding=(0, 0, 0, self.max_graph_node - nodes))
             self.user_graph_dict[key].x = pad(self.user_graph_dict[key].x)
+            # padding edges
             edges = self.user_graph_dict[key].edge_index.shape[1]
             pad = nn.ZeroPad2d(padding=(0, self.max_graph_edges - edges, 0, 0))
             self.user_graph_dict[key].edge_index = pad(self.user_graph_dict[key].edge_index)
+            #  padding weight
+            weight_len = self.user_graph_weight_dict[key].shape[0]
+            pad = nn.ZeroPad2d(padding=(0, 0, 0, self.max_graph_edges - weight_len))
+            self.user_graph_weight_dict[key] = pad(self.user_graph_weight_dict[key])
 
     def load_user_graph(self):
-        users_graphs = glob.glob(self.user_graph_path + '/*.pkl')
-        user_count = len(users_graphs)
-        for graph, user in zip(users_graphs, range(1, user_count + 1)):
-            with open(graph, "rb") as f:
+        users_graphs = glob.glob(self.user_graph_path + '/*graph_data.pkl')
+        for graph_file in users_graphs:
+            user = re.findall(r'users/(.*?)_user', graph_file)[0]
+            user = int(user)
+            with open(graph_file, "rb") as f:
                 self.user_graph_dict[user] = pickle.load(f)
                 if self.user_graph_dict[user].x.shape[0] > self.max_graph_node:
                     self.max_graph_node = self.user_graph_dict[user].x.shape[0]
                 if self.user_graph_dict[user].edge_index.shape[1] > self.max_graph_edges:
                     self.max_graph_edges = self.user_graph_dict[user].edge_index.shape[1]
+            weight_file = graph_file.replace('graph_data', 'graph_weight_data')
+            with open(weight_file, "rb") as f:
+                self.user_graph_weight_dict[user] = pickle.load(f)
+        # print(self.max_graph_node)
 
     def timestamp2vec(self, days):
         ret = []
@@ -132,41 +153,69 @@ def normal_data(df):
 
 def spilt_data(data_name, rate=0.8):
     if data_name == 'NYC':
-        data_path = './data/NYC_trajectory.csv'
+        data_path = './data/dataset_TSMC2014_NYC.txt'
     elif data_name == 'TKY':
         data_path = './data/dataset_TSMC2014_TKY.txt'
-    df = pd.read_csv(data_path)
-    print(len(set(df['poi_id'])), len(set(df['user_id'])), len(set(df['cat_id'])))
+    df = pd.read_table(data_path, header=None, encoding="latin-1")
+    df = build_trajectory(df)
+    print(len(set(df['poi_id'])), len(set(df['user_id'])), len(set(df['cat_id'])), len(df))
+    df = filter_data(df)
+    print(len(set(df['poi_id'])), len(set(df['user_id'])), len(set(df['cat_id'])), len(df))
     df = normal_data(df)
-    df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'timestamp', 'day'], axis=1, inplace=True)
+    df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'day', 'latitude', 'longitude', 'timestamp'], axis=1, inplace=True)
     train_data = []
+    train_past_data = []
     test_data = []
+    test_past_data = []
     for _, group in df.groupby('user_id'):
         trajectory_len = len(set(group['trajectory_id']))
         train_len = int(trajectory_len * rate)
         if train_len == 0:
             train_len = trajectory_len
         train = []
+        train_past = []
         test = []
+        test_past = []
+        count = 0
+        pre_group = []
         for _, tra_group in group.groupby('trajectory_id'):
+            if count == 0:
+                count = 1
+                train_len -= 1
+                pre_group = np.array(tra_group.drop(['trajectory_id'], axis=1))
+                continue
             if train_len > 0:
                 train.append(np.array(tra_group.drop(['trajectory_id'], axis=1)))
                 train_len -= 1
+                train_past.append(pre_group)
+                pre_group = np.insert(pre_group, 1, np.array(tra_group.drop(['trajectory_id'], axis=1)), axis=0)
+                if train_len == 0:
+                    pre_group = np.array(tra_group.drop(['trajectory_id'], axis=1))
             else:
                 test.append(np.array(tra_group.drop(['trajectory_id'], axis=1)))
+                test_past.append(pre_group)
+                pre_group = np.insert(pre_group, 1, np.array(tra_group.drop(['trajectory_id'], axis=1)), axis=0)
         train_data += train
+        train_past_data += train_past
         test_data += test
+        test_past_data += test_past
     if not os.path.exists('./processed/{}/poi_data'.format(data_name)):
         os.makedirs('./processed/{}/poi_data'.format(data_name))
     train_data = np.array(train_data)
     test_data = np.array(test_data)
+    train_past_data = np.array(train_past_data)
+    test_past_data = np.array(test_past_data)
     pickle.dump(train_data, open('./processed/{}/poi_data/train_data.pkl'.format(data_name), 'wb'))
+    pickle.dump(train_past_data, open('./processed/{}/poi_data/train_past_data.pkl'.format(data_name), 'wb'))
     pickle.dump(test_data, open('./processed/{}/poi_data/test_data.pkl'.format(data_name), 'wb'))
+    pickle.dump(test_past_data, open('./processed/{}/poi_data/test_past_data.pkl'.format(data_name), 'wb'))
+    print(len(train_data), len(test_data))
 
 
 if __name__ == '__main__':
-    spilt_data('NYC', rate=0.9)
-    dataset = PoiDataset('NYC', 'train')
+    spilt_data('NYC', rate=0.8)
+    dataset = PoiDataset('NYC', 'test')
     train_loader = data.DataLoader(dataset=dataset, batch_size=32, shuffle=False, collate_fn=lambda x: x)
     for _, batch_data in enumerate(train_loader, 1):
         print(1)
+        break
