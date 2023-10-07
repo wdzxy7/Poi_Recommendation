@@ -194,9 +194,12 @@ def main():
     if data_name == 'TKY':
         data = pd.read_table('./data/dataset_TSMC2014_TKY.txt', header=None, encoding="latin-1")
         data = build_trajectory(data)
-    print(len(set(data['poi_id'])), len(set(data['user_id'])), len(set(data['cat_id'])), len(data))
+    print('Raw data:\ndata_len: {}\t\t poi_len: {}\t\t cat_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
+        len(data), len(set(data['poi_id'])), len(set(data['cat_id'])), len(set(data['user_id'])), len(set(data['trajectory_id']))))
     data = filter_data(data)
-    print(len(set(data['poi_id'])), len(set(data['user_id'])), len(set(data['cat_id'])), len(data))
+    print('Flitered data:\ndata_len: {}\t\t poi_len: {}\t\t cat_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
+        len(data), len(set(data['poi_id'])), len(set(data['cat_id'])), len(set(data['user_id'])),
+        len(set(data['trajectory_id']))))
     global_graph = build_global_graph(data)
     save_graph_to_pickle(global_graph)
     save_graph_edge(global_graph)
@@ -216,7 +219,7 @@ def build_trajectory(df):
         trajectory_id = 1
         for _, u in group.iterrows():
             now_time = u['time']
-            if now_time- pd.Timedelta(10, "H") <= start_time:
+            if now_time- pd.Timedelta(24, "H") <= start_time:
                 trajectory.append(str(user_id) + '_' + str(trajectory_id))
             else:
                 trajectory_id += 1
@@ -231,13 +234,13 @@ def filter_data(data):
         if group.shape[0] < 10:
             data.drop(data[(data.poi_id == poi_id)].index, inplace=True)
     for user_id, group in data.groupby('user_id'):
-        if group.shape[0] < 50:
+        if group.shape[0] < 10:
             data.drop(data[(data.user_id == user_id)].index, inplace=True)
     for group_id, group in data.groupby('trajectory_id'):
         if group.shape[0] < 3:
             data.drop(data[(data.trajectory_id == group_id)].index, inplace=True)
     for user_id, group in data.groupby('user_id'):
-        if len(set(group.trajectory_id)) < 3:
+        if len(set(group.trajectory_id)) < 4:
             data.drop(data[(data.user_id == user_id)].index, inplace=True)
     # resort
     data['user_id'] = data['user_id'].rank(method='dense').values

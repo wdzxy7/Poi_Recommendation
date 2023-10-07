@@ -15,12 +15,12 @@ os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
 parser = argparse.ArgumentParser(description='Parameters for my model')
-parser.add_argument('--poi_len', type=int, default=4672, help='The length of POI_id,NYC is 5099, TKY is 61858')
-parser.add_argument('--user_len', type=int, default=721, help='The length of users')
-parser.add_argument('--cat_len', type=int, default=307, help='The length of category')
-parser.add_argument('--node_len', type=int, default=223, help='The length of user graph node(debug to see)')
-parser.add_argument('--lat_len', type=int, default=4672, help='The length of gps')
-parser.add_argument('--long_len', type=int, default=4672, help='The length of gps')
+parser.add_argument('--poi_len', type=int, default=4970, help='The length of POI_id,NYC is 5099, TKY is 61858')
+parser.add_argument('--user_len', type=int, default=873, help='The length of users')
+parser.add_argument('--cat_len', type=int, default=314, help='The length of category')
+parser.add_argument('--node_len', type=int, default=235, help='The length of user graph node(debug to see)')
+parser.add_argument('--lat_len', type=int, default=4970, help='The length of gps')
+parser.add_argument('--long_len', type=int, default=4970, help='The length of gps')
 
 parser.add_argument('--cat_dim', type=int, default=100, help='The embedding dim of poi category')
 parser.add_argument('--user_dim', type=int, default=50, help='The embedding dim of poi users')
@@ -30,7 +30,7 @@ parser.add_argument('--gcn_channel', type=int, default=128, help='The channels i
 
 parser.add_argument('--graph_out_dim', type=int, default=1024, help='The embedding dim of three graph Conv')
 parser.add_argument('--global_graph_layers', type=int, default=5, help='The gcn layers in GlobalGraphNet')
-parser.add_argument('--global_dist_features', type=int, default=326, help='The feature sum of global distance graph(debug to see)')
+parser.add_argument('--global_dist_features', type=int, default=434, help='The feature sum of global distance graph(debug to see)')
 parser.add_argument('--global_dist_layers', type=int, default=4, help='The gcn layers in GlobalDistNet')
 parser.add_argument('--user_graph_layers', type=int, default=3, help='The gcn layers in UserGraphNet')
 parser.add_argument('--embed_size_user', type=int, default=50, help='The embedding dim of embed_size_user in UserHistoryNet')
@@ -45,14 +45,14 @@ parser.add_argument('--dropout', type=float, default=0.5, help='The dropout rate
 parser.add_argument('--tran_head', type=int, default=4, help='The number of heads in Transformer')
 parser.add_argument('--tran_hid', type=int, default=128, help='The dim in Transformer')
 parser.add_argument('--tran_layers', type=int, default=3, help='The layer of Transformer')
-parser.add_argument('--epochs', type=int, default=200, help='Epochs of train')
+parser.add_argument('--epochs', type=int, default=100, help='Epochs of train')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size of dataloader')
 parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate of optimizer')
 parser.add_argument('--weight_decay', type=float, default=0, help='Weight_decay of optimizer')
 parser.add_argument('--lr_scheduler_factor', type=float, default=0.1, help='The decrease rate of ReduceLROnPlateau')
 parser.add_argument('--data_name', type=str, default='NYC', help='Train data name')
-parser.add_argument('--gpu_num', type=int, default=2, help='Choose which GPU to use')
-parser.add_argument('--seed', type=int, default=1000, help='random seed')
+parser.add_argument('--gpu_num', type=int, default=1, help='Choose which GPU to use')
+parser.add_argument('--seed', type=int, default=random.randint(1, 10000), help='random seed')
 
 
 def load_data():
@@ -138,10 +138,9 @@ def train():
             user_graph_model.train()
             user_history_model.train()
             optimizer.zero_grad()
-            history_feature, y, past, trajectory_len, user_graph, user_graph_edges, user_graph_weight = spilt_batch(batch_data)
+            history_feature, y, trajectory_len, user_graph, user_graph_edges, user_graph_weight = spilt_batch(batch_data)
             y = y.to(device)
             history_feature = history_feature.to(device)
-            past = past.to(device)
             user_graph = user_graph.to(device)
             user_graph_edges = user_graph_edges.to(device)
             global_graph = global_graph.to(device)
@@ -152,7 +151,7 @@ def train():
             global_graph_feature = global_graph_model(global_graph, global_graph_weight)
             global_dist_feature = global_dist_model(global_dist, dist_mask, global_dist_weight)
             user_graph_feature = user_graph_model(user_graph, user_graph_edges, user_graph_weight)
-            user_history_feature = user_history_model(history_feature, past)
+            user_history_feature = user_history_model(history_feature)
             global_graph_feature = global_graph_feature.repeat(b_len, user_history_feature.shape[1], 1)
             global_dist_feature = global_dist_feature.repeat(b_len, user_history_feature.shape[1], 1)
             user_graph_feature = user_graph_feature.reshape(b_len, 1, -1).repeat(1, user_history_feature.shape[1], 1)
@@ -214,17 +213,16 @@ def test_model(epoch, criterion, global_graph_model, global_dist_model, user_gra
             b_len = len(batch_data)
             if b_len != batch_size:
                 src_mask = transformer.generate_square_subsequent_mask(b_len).to(device)
-            history_feature, y, past, trajectory_len, user_graph, user_graph_edges, user_graph_weight = spilt_batch(batch_data)
+            history_feature, y, trajectory_len, user_graph, user_graph_edges, user_graph_weight = spilt_batch(batch_data)
             y = y.to(device)
             history_feature = history_feature.to(device)
-            past = past.to(device)
             user_graph = user_graph.to(device)
             user_graph_edges = user_graph_edges.to(device)
             user_graph_weight = user_graph_weight.to(device)
             global_graph_feature = global_graph_model(global_graph, global_graph_weight)
             global_dist_feature = global_dist_model(global_dist, dist_mask, global_dist_weight)
             user_graph_feature = user_graph_model(user_graph, user_graph_edges, user_graph_weight)
-            user_history_feature = user_history_model(history_feature, past)
+            user_history_feature = user_history_model(history_feature)
             global_graph_feature = global_graph_feature.repeat(y.shape[0], user_history_feature.shape[1], 1)
             global_dist_feature = global_dist_feature.repeat(y.shape[0], user_history_feature.shape[1], 1)
             user_graph_feature = user_graph_feature.reshape(y.shape[0], 1, -1).repeat(1, user_history_feature.shape[1], 1)
@@ -332,20 +330,18 @@ def set_logger():
 
 
 def spilt_batch(batch):
-    history_feature, y, past, trajectory_len, user_graph, user_graph_edges, user_graph_weight = [], [], [], [], [], [], []
+    history_feature, y, trajectory_len, user_graph, user_graph_edges, user_graph_weight = [], [], [], [], [], []
     for i in batch:
         history_feature.append(i[0])
         y.append(i[1])
-        past.append(i[2])
-        trajectory_len.append(i[3])
-        user_graph.append(i[4])
-        user_graph_edges.append(i[5])
-        user_graph_weight.append(i[6])
+        trajectory_len.append(i[2])
+        user_graph.append(i[3])
+        user_graph_edges.append(i[4])
+        user_graph_weight.append(i[5])
     history_feature = pad_sequence(history_feature, batch_first=True, padding_value=0)
-    past = pad_sequence(past, batch_first=True, padding_value=0)
     y = pad_sequence(y, batch_first=True, padding_value=0)
     user_graph_weight = pad_sequence(user_graph_weight, batch_first=True, padding_value=0)
-    return history_feature, y, past, trajectory_len, torch.stack(user_graph), torch.stack(user_graph_edges), user_graph_weight
+    return history_feature, y, trajectory_len, torch.stack(user_graph), torch.stack(user_graph_edges), user_graph_weight
 
 
 if __name__ == '__main__':

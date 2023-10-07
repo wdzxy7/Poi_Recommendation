@@ -213,20 +213,18 @@ class UserHistoryNet(nn.Module):
         self.out_w_hist = Parameter(torch.Tensor([0.33]).repeat(poi_len), requires_grad=True)
         self.softmax = nn.Softmax(dim=1)
 
-    def forward(self, inputs, past):
-        past = past[:, 0: inputs.shape[1], :]
-        pas_out = self.past_output(past, self.embed_poi, self.embed_user, self.embed_cat, self.embed_hour, self.embed_week, self.gru_past)
+    def forward(self, inputs):
         poi_feature = torch.cat((inputs[:, :, 0: 2], inputs[:, :, 3:]), dim=2)
         cat_feature = torch.cat((inputs[:, :, 0:1], inputs[:, :, 2:]), dim=2)
-        poi_out = self.get_output(poi_feature, self.embed_poi, self.embed_user, self.embed_hour, self.embed_week, self.gru_poi, self.poi_fc, pas_out)
-        cat_out = self.get_output(cat_feature, self.embed_cat, self.embed_user, self.embed_hour, self.embed_week, self.gru_cat, self.cat_fc, pas_out)
+        poi_out = self.get_output(poi_feature, self.embed_poi, self.embed_user, self.embed_hour, self.embed_week, self.gru_poi, self.poi_fc)
+        cat_out = self.get_output(cat_feature, self.embed_cat, self.embed_user, self.embed_hour, self.embed_week, self.gru_cat, self.cat_fc)
         out_w_poi = self.out_w_poi[inputs[:, :, 0: 1].long()]
         out_w_cat = self.out_w_cat[inputs[:, :, 0: 1].long()]
         poi_out = torch.mul(poi_out, out_w_poi)
         cat_out = torch.mul(cat_out, out_w_cat)
         return poi_out + cat_out
 
-    def get_output(self, inputs, embed_id, embed_user, embed_hour, embed_week, lstm, fc, pas_out):
+    def get_output(self, inputs, embed_id, embed_user, embed_hour, embed_week, lstm, fc):
         b = inputs.shape[0]
         user_feature = inputs[:, :, 0: 1].int()
         id_feature = inputs[:, :, 1: 2].int()
@@ -238,24 +236,7 @@ class UserHistoryNet(nn.Module):
         emb_week = embed_week(week_feature.reshape(b, -1))
         features = torch.cat((emb_user, emb_id, emb_hour, emb_week), dim=2)
         output, _ = lstm(features)
-        # output = output + pas_out[:, 0: output.shape[1], :]
         return fc(output)
-
-    def past_output(self, inputs, embed_id, embed_user, embed_cat, embed_hour, embed_week, lstm):
-        b = inputs.shape[0]
-        user_feature = inputs[:, :, 0: 1].int()
-        id_feature = inputs[:, :, 1: 2].int()
-        cat_feature = inputs[:, :, 2: 3].int()
-        hour_feature = inputs[:, :, -2: -1].int()
-        week_feature = inputs[:, :, -1:].int()
-        emb_user = embed_user(user_feature.reshape(b, -1))
-        emb_id = embed_id(id_feature.reshape(b, -1))
-        emb_cat = embed_cat(cat_feature.reshape(b, -1))
-        emb_hour = embed_hour(hour_feature.reshape(b, -1))
-        emb_week = embed_week(week_feature.reshape(b, -1))
-        features = torch.cat((emb_user, emb_id, emb_cat, emb_hour, emb_week), dim=2)
-        output, _ = lstm(features)
-        return output
 
 
 class PositionalEncoding(nn.Module):

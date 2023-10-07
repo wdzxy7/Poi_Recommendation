@@ -54,7 +54,7 @@ def build_global_graph_data():
 def build_user_graph_data():
     users = glob.glob('./graph/{}/user_graph/edges/*.edgelist'.format(data_name))
     user_count = len(users) + 1
-    max_checkin_count = 199
+    max_checkin_count = 234
     max_count = 0
     for i in range(1, user_count):
         idx_file = './graph/{}/user_graph/id2idx/'.format(data_name) + str(i) + '_node_id2idx.txt'

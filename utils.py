@@ -54,8 +54,6 @@ class PoiDataset(data.Dataset):
             self.user_graph_path = './processed/TKY/users'
         with open(poi_data_path + '{}_data.pkl'.format(data_type), 'rb') as f:
             self.user_poi_data = pickle.load(f)
-        with open(poi_data_path + '{}_past_data.pkl'.format(data_type), 'rb') as f:
-            self.user_past_data = pickle.load(f)
         self.poi_data = []
         self.past_data = []
         self.trajectory_len = []
@@ -68,11 +66,10 @@ class PoiDataset(data.Dataset):
 
     def __getitem__(self, index):
         x = self.poi_data[index][:-1]
-        past = self.past_data[index]
         y = self.poi_data[index][1:][:, 1]
         graph = self.user_graph_dict[int(x[0][0])]
         weight = self.user_graph_weight_dict[int(x[0][0])]
-        return x, y, past, self.trajectory_len[index], graph.x, graph.edge_index, weight
+        return x, y, self.trajectory_len[index], graph.x, graph.edge_index, weight
 
     def __len__(self):
         return self.data_len
@@ -85,10 +82,10 @@ class PoiDataset(data.Dataset):
             self.poi_data.append(torch.Tensor(line))
             self.trajectory_len.append(len(line) - 1)
         '''
-        for line, past in zip(self.user_poi_data, self.user_past_data):
-            self.poi_data.append(torch.Tensor(line))
-            self.past_data.append(torch.Tensor(past))
-            self.trajectory_len.append(len(line) - 1)
+        for line in zip(self.user_poi_data):
+            poi = torch.Tensor(line)[0]
+            self.poi_data.append(poi)
+            self.trajectory_len.append(poi.shape[0] - 1)
 
     def pad_graph(self):
         for key in self.user_graph_dict.keys():
@@ -151,69 +148,71 @@ def normal_data(df):
     return df
 
 
-def spilt_data(data_name, rate=0.8):
-    if data_name == 'NYC':
-        data_path = './data/dataset_TSMC2014_NYC.txt'
-    elif data_name == 'TKY':
-        data_path = './data/dataset_TSMC2014_TKY.txt'
-    df = pd.read_table(data_path, header=None, encoding="latin-1")
-    df = build_trajectory(df)
-    print(len(set(df['poi_id'])), len(set(df['user_id'])), len(set(df['cat_id'])), len(df))
-    df = filter_data(df)
-    print(len(set(df['poi_id'])), len(set(df['user_id'])), len(set(df['cat_id'])), len(df))
-    df = normal_data(df)
-    df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'day', 'latitude', 'longitude', 'timestamp'], axis=1, inplace=True)
+def spilt_data(data_name, rate=0.8, read=False):
+    val_rate = (1 - rate) / 2
+    if read:
+        df = pd.read_csv('fliter.csv')
+        df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'day', 'latitude', 'longitude', 'timestamp'], axis=1,
+                inplace=True)
+    else:
+        if data_name == 'NYC':
+            data_path = './data/dataset_TSMC2014_NYC.txt'
+        elif data_name == 'TKY':
+            data_path = './data/dataset_TSMC2014_TKY.txt'
+        df = pd.read_table(data_path, header=None, encoding="latin-1")
+        df = build_trajectory(df)
+        print(len(set(df['poi_id'])), len(set(df['user_id'])), len(set(df['cat_id'])), len(df), len(set(df['trajectory_id'])))
+        df = filter_data(df)
+        df = normal_data(df)
+        df.to_csv('fliter.csv', index_label=False)
+        df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'day', 'latitude', 'longitude', 'timestamp'], axis=1, inplace=True)
+    print(
+        'Flitered data:\ndata_len: {}\t\t poi_len: {}\t\t cat_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
+            len(df), len(set(df['poi_id'])), len(set(df['cat_id'])), len(set(df['user_id'])),
+            len(set(df['trajectory_id']))))
     train_data = []
-    train_past_data = []
     test_data = []
-    test_past_data = []
+    val_data = []
     for _, group in df.groupby('user_id'):
         trajectory_len = len(set(group['trajectory_id']))
         train_len = int(trajectory_len * rate)
+        test_len, val_len = int(trajectory_len * val_rate * 2), int(trajectory_len * val_rate * 0)
         if train_len == 0:
             train_len = trajectory_len
         train = []
-        train_past = []
         test = []
-        test_past = []
+        val = []
         count = 0
-        pre_group = []
         for _, tra_group in group.groupby('trajectory_id'):
             if count == 0:
                 count = 1
                 train_len -= 1
-                pre_group = np.array(tra_group.drop(['trajectory_id'], axis=1))
                 continue
             if train_len > 0:
                 train.append(np.array(tra_group.drop(['trajectory_id'], axis=1)))
                 train_len -= 1
-                train_past.append(pre_group)
-                pre_group = np.insert(pre_group, 1, np.array(tra_group.drop(['trajectory_id'], axis=1)), axis=0)
-                if train_len == 0:
-                    pre_group = np.array(tra_group.drop(['trajectory_id'], axis=1))
-            else:
+            elif val_len > 0:
+                val.append(np.array(tra_group.drop(['trajectory_id'], axis=1)))
+                val_len -= 1
+            elif test_len > 0:
                 test.append(np.array(tra_group.drop(['trajectory_id'], axis=1)))
-                test_past.append(pre_group)
-                pre_group = np.insert(pre_group, 1, np.array(tra_group.drop(['trajectory_id'], axis=1)), axis=0)
+                test_len -= 1
         train_data += train
-        train_past_data += train_past
+        val_data += val
         test_data += test
-        test_past_data += test_past
     if not os.path.exists('./processed/{}/poi_data'.format(data_name)):
         os.makedirs('./processed/{}/poi_data'.format(data_name))
     train_data = np.array(train_data)
     test_data = np.array(test_data)
-    train_past_data = np.array(train_past_data)
-    test_past_data = np.array(test_past_data)
+    val_data = np.array(val_data)
     pickle.dump(train_data, open('./processed/{}/poi_data/train_data.pkl'.format(data_name), 'wb'))
-    pickle.dump(train_past_data, open('./processed/{}/poi_data/train_past_data.pkl'.format(data_name), 'wb'))
+    pickle.dump(val_data, open('./processed/{}/poi_data/val_data.pkl'.format(data_name), 'wb'))
     pickle.dump(test_data, open('./processed/{}/poi_data/test_data.pkl'.format(data_name), 'wb'))
-    pickle.dump(test_past_data, open('./processed/{}/poi_data/test_past_data.pkl'.format(data_name), 'wb'))
-    print(len(train_data), len(test_data))
+    print(len(train_data), len(val_data), len(test_data))
 
 
 if __name__ == '__main__':
-    spilt_data('NYC', rate=0.8)
+    spilt_data('NYC', rate=0.8, read=False)
     dataset = PoiDataset('NYC', 'test')
     train_loader = data.DataLoader(dataset=dataset, batch_size=32, shuffle=False, collate_fn=lambda x: x)
     for _, batch_data in enumerate(train_loader, 1):
