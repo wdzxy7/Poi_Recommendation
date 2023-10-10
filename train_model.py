@@ -22,9 +22,9 @@ parser.add_argument('--node_len', type=int, default=235, help='The length of use
 parser.add_argument('--lat_len', type=int, default=4970, help='The length of gps')
 parser.add_argument('--long_len', type=int, default=4970, help='The length of gps')
 
-parser.add_argument('--cat_dim', type=int, default=100, help='The embedding dim of poi category')
-parser.add_argument('--user_dim', type=int, default=50, help='The embedding dim of poi users')
-parser.add_argument('--poi_dim', type=int, default=300, help='The embedding dim of pois')
+parser.add_argument('--cat_dim', type=int, default=200, help='The embedding dim of poi category')
+parser.add_argument('--user_dim', type=int, default=150, help='The embedding dim of poi users')
+parser.add_argument('--poi_dim', type=int, default=100, help='The embedding dim of pois')
 parser.add_argument('--gps_dim', type=int, default=100, help='The embedding dim of gps')
 parser.add_argument('--gcn_channel', type=int, default=128, help='The channels in GCN')
 
@@ -33,13 +33,13 @@ parser.add_argument('--global_graph_layers', type=int, default=5, help='The gcn 
 parser.add_argument('--global_dist_features', type=int, default=434, help='The feature sum of global distance graph(debug to see)')
 parser.add_argument('--global_dist_layers', type=int, default=4, help='The gcn layers in GlobalDistNet')
 parser.add_argument('--user_graph_layers', type=int, default=3, help='The gcn layers in UserGraphNet')
-parser.add_argument('--embed_size_user', type=int, default=50, help='The embedding dim of embed_size_user in UserHistoryNet')
-parser.add_argument('--embed_size_poi', type=int, default=300, help='The embedding dim of embed_size_poi in UserHistoryNet')
-parser.add_argument('--embed_size_cat', type=int, default=100, help='The embedding dim of embed_size_cat in UserHistoryNet')
+parser.add_argument('--embed_size_user', type=int, default=150, help='The embedding dim of embed_size_user in UserHistoryNet')  #150
+parser.add_argument('--embed_size_poi', type=int, default=100, help='The embedding dim of embed_size_poi in UserHistoryNet')  #100
+parser.add_argument('--embed_size_cat', type=int, default=200, help='The embedding dim of embed_size_cat in UserHistoryNet')  #200
 parser.add_argument('--embed_size_hour', type=int, default=20, help='The embedding dim of embed_size_hour in UserHistoryNet')
 parser.add_argument('--history_out_dim', type=int, default=1024, help='The embedding dim of GRU in UserHistoryNet')
-parser.add_argument('--hidden_size', type=int, default=128, help='The hidden size in UserHistoryNet`s LSTM')
-parser.add_argument('--lstm_layers', type=int, default=3, help='The layer of LSTM model in UserHistoryNet')
+parser.add_argument('--hidden_size', type=int, default=128, help='The hidden size in UserHistoryNet`s LSTM')  #128
+parser.add_argument('--lstm_layers', type=int, default=2, help='The layer of LSTM model in UserHistoryNet')  #2
 parser.add_argument('--hid_dim', type=int, default=128, help='The dim of previous four model')
 parser.add_argument('--dropout', type=float, default=0.5, help='The dropout rate in Transformer')
 parser.add_argument('--tran_head', type=int, default=4, help='The number of heads in Transformer')
@@ -51,8 +51,8 @@ parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate of opt
 parser.add_argument('--weight_decay', type=float, default=0, help='Weight_decay of optimizer')
 parser.add_argument('--lr_scheduler_factor', type=float, default=0.1, help='The decrease rate of ReduceLROnPlateau')
 parser.add_argument('--data_name', type=str, default='NYC', help='Train data name')
-parser.add_argument('--gpu_num', type=int, default=1, help='Choose which GPU to use')
-parser.add_argument('--seed', type=int, default=random.randint(1, 10000), help='random seed')
+parser.add_argument('--gpu_num', type=int, default=5, help='Choose which GPU to use')
+parser.add_argument('--seed', type=int, default=1000, help='random seed')
 
 
 def load_data():
@@ -186,6 +186,7 @@ def train():
             train_batches_mrr_list.append(mrr / b_len)
             optimizer.step()
             sys.stdout.write("\rTRAINDATE:  Epoch:{}\t\t loss:{} res train:{}".format(epoch, loss.item(), train_len - _))
+            break
         monitor_loss = test_model(epoch, criterion, global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer, test_loader,
                    global_graph, global_graph_weight, global_dist, global_dist_weight, dist_mask)
         # stepLR.step(monitor_loss)
@@ -262,7 +263,7 @@ def test_model(epoch, criterion, global_graph_model, global_dist_model, user_gra
                                                np.mean(test_batches_mrr_list)))
     print(mess)
     logger.info(str(mess))
-    if precision_20 > 0.6900:
+    if precision_20 > 0.7100:
         save_model(global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer)
     return np.mean(loss_list)
 
