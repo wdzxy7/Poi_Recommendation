@@ -15,12 +15,12 @@ os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
 parser = argparse.ArgumentParser(description='Parameters for my model')
-parser.add_argument('--poi_len', type=int, default=4970, help='The length of POI_id,NYC is 5099, TKY is 61858')
-parser.add_argument('--user_len', type=int, default=873, help='The length of users')
-parser.add_argument('--cat_len', type=int, default=314, help='The length of category')
-parser.add_argument('--node_len', type=int, default=235, help='The length of user graph node(debug to see)')
-parser.add_argument('--lat_len', type=int, default=4970, help='The length of gps')
-parser.add_argument('--long_len', type=int, default=4970, help='The length of gps')
+parser.add_argument('--poi_len', type=int, default=7791, help='The length of POI_id,NYC is 5099, TKY is 61858')
+parser.add_argument('--user_len', type=int, default=2124, help='The length of users')
+parser.add_argument('--cat_len', type=int, default=286, help='The length of category')
+parser.add_argument('--node_len', type=int, default=334, help='The length of user graph node(debug to see)')
+parser.add_argument('--lat_len', type=int, default=7791, help='The length of gps')
+parser.add_argument('--long_len', type=int, default=7791, help='The length of gps')
 
 parser.add_argument('--cat_dim', type=int, default=200, help='The embedding dim of poi category')
 parser.add_argument('--user_dim', type=int, default=150, help='The embedding dim of poi users')
@@ -30,7 +30,7 @@ parser.add_argument('--gcn_channel', type=int, default=128, help='The channels i
 
 parser.add_argument('--graph_out_dim', type=int, default=1024, help='The embedding dim of three graph Conv')
 parser.add_argument('--global_graph_layers', type=int, default=5, help='The gcn layers in GlobalGraphNet')
-parser.add_argument('--global_dist_features', type=int, default=434, help='The feature sum of global distance graph(debug to see)')
+parser.add_argument('--global_dist_features', type=int, default=2294, help='The feature sum of global distance graph(debug to see)')
 parser.add_argument('--global_dist_layers', type=int, default=4, help='The gcn layers in GlobalDistNet')
 parser.add_argument('--user_graph_layers', type=int, default=3, help='The gcn layers in UserGraphNet')
 parser.add_argument('--embed_size_user', type=int, default=150, help='The embedding dim of embed_size_user in UserHistoryNet')  #150
@@ -50,8 +50,8 @@ parser.add_argument('--batch_size', type=int, default=32, help='Batch size of da
 parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate of optimizer')
 parser.add_argument('--weight_decay', type=float, default=0, help='Weight_decay of optimizer')
 parser.add_argument('--lr_scheduler_factor', type=float, default=0.1, help='The decrease rate of ReduceLROnPlateau')
-parser.add_argument('--data_name', type=str, default='NYC', help='Train data name')
-parser.add_argument('--gpu_num', type=int, default=5, help='Choose which GPU to use')
+parser.add_argument('--data_name', type=str, default='TKY', help='Train data name')
+parser.add_argument('--gpu_num', type=int, default=7, help='Choose which GPU to use')
 parser.add_argument('--seed', type=int, default=1000, help='random seed')
 
 
@@ -121,13 +121,6 @@ def train():
     # stepLR = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True, factor=lr_scheduler_factor)
     dist_mask = dist_mask.to(device)
     for epoch in range(epochs):
-        train_batches_top1_acc_list = []
-        train_batches_top5_acc_list = []
-        train_batches_top10_acc_list = []
-        train_batches_top15_acc_list = []
-        train_batches_top20_acc_list = []
-        train_batches_mAP20_list = []
-        train_batches_mrr_list = []
         src_mask = transformer.generate_square_subsequent_mask(batch_size).to(device)
         for _, batch_data in enumerate(train_loader, 1):
             b_len = len(batch_data)
@@ -158,35 +151,8 @@ def train():
             y_pred = transformer(user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature, src_mask)
             loss = criterion(y_pred.transpose(1, 2), y.long())
             loss.backward(retain_graph=True)
-            precision_1 = 0
-            precision_5 = 0
-            precision_10 = 0
-            precision_15 = 0
-            precision_20 = 0
-            mAP20 = 0
-            mrr = 0
-            y_pred = y_pred.detach().cpu().numpy()
-            y = y.detach().cpu().numpy()
-            for predict, true, tra_len in zip(y_pred, y, trajectory_len):
-                true = true[: tra_len]
-                predict = predict[: tra_len, :]
-                precision_1 += top_k_acc_last_timestep(true, predict, k=1)
-                precision_5 += top_k_acc_last_timestep(true, predict, k=5)
-                precision_10 += top_k_acc_last_timestep(true, predict, k=10)
-                precision_15 += top_k_acc_last_timestep(true, predict, k=15)
-                precision_20 += top_k_acc_last_timestep(true, predict, k=20)
-                mAP20 += mAP_metric_last_timestep(true, predict, k=20)
-                mrr += MRR_metric_last_timestep(true, predict)
-            train_batches_top1_acc_list.append(precision_1 / b_len)
-            train_batches_top5_acc_list.append(precision_5 / b_len)
-            train_batches_top10_acc_list.append(precision_10 / b_len)
-            train_batches_top15_acc_list.append(precision_15 / b_len)
-            train_batches_top20_acc_list.append(precision_20 / b_len)
-            train_batches_mAP20_list.append(mAP20 / b_len)
-            train_batches_mrr_list.append(mrr / b_len)
             optimizer.step()
             sys.stdout.write("\rTRAINDATE:  Epoch:{}\t\t loss:{} res train:{}".format(epoch, loss.item(), train_len - _))
-            break
         monitor_loss = test_model(epoch, criterion, global_graph_model, global_dist_model, user_graph_model, user_history_model, transformer, test_loader,
                    global_graph, global_graph_weight, global_dist, global_dist_weight, dist_mask)
         # stepLR.step(monitor_loss)
