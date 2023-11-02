@@ -9,15 +9,23 @@ from torch_geometric.data import Data
 
 
 def np_to_dict(node_index):
-    node = node_index[:, 0].tolist()
-    ind = node_index[:, 1].tolist()
+    try:
+        node = node_index[:, 0].tolist()
+        ind = node_index[:, 1].tolist()
+    except:
+        return dict(zip([node_index[1]], [node_index[0]]))
     return dict(zip(ind, node))
 
 
 def get_edge_index(edges):
-    source = edges[:, 0]
-    dest = edges[:, 1]
-    weight = edges[:, -1]
+    try:
+        source = edges[:, 0]
+        dest = edges[:, 1]
+        weight = edges[:, -1]
+    except:
+        source = [edges[0]]
+        dest = [edges[1]]
+        weight = [edges[-1]]
     edge_index = torch.tensor([source, dest], dtype=torch.long)
     return edge_index, weight
 
@@ -54,7 +62,7 @@ def build_global_graph_data():
 def build_user_graph_data():
     users = glob.glob('./graph/{}/user_graph/edges/*.edgelist'.format(data_name))
     user_count = len(users) + 1
-    max_checkin_count = 234
+    max_checkin_count = 254
     max_count = 0
     for i in range(1, user_count):
         idx_file = './graph/{}/user_graph/id2idx/'.format(data_name) + str(i) + '_node_id2idx.txt'
@@ -177,7 +185,7 @@ def mkdirs():
 
 
 if __name__ == '__main__':
-    data_name = 'NYC'
+    data_name = 'TKY'
     mkdirs()
     build_global_graph_data()
     build_user_graph_data()

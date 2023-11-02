@@ -213,7 +213,7 @@ class UserHistoryNet(nn.Module):
         self.out_w_hist = Parameter(torch.Tensor([0.33]).repeat(poi_len), requires_grad=True)
         self.softmax = nn.Softmax(dim=1)
 
-    def forward(self, inputs):
+    def forward(self, inputs, neighbor):
         poi_feature = torch.cat((inputs[:, :, 0: 2], inputs[:, :, 3:]), dim=2)
         cat_feature = torch.cat((inputs[:, :, 0:1], inputs[:, :, 2:]), dim=2)
         poi_out = self.get_output(poi_feature, self.embed_poi, self.embed_user, self.embed_hour, self.embed_week, self.gru_poi, self.poi_fc)
@@ -222,7 +222,8 @@ class UserHistoryNet(nn.Module):
         out_w_cat = self.out_w_cat[inputs[:, :, 0: 1].long()]
         poi_out = torch.mul(poi_out, out_w_poi)
         cat_out = torch.mul(cat_out, out_w_cat)
-        return poi_out + cat_out
+        embed_neighbor = self.embed_poi(neighbor.int())
+        return poi_out + cat_out, embed_neighbor.reshape(embed_neighbor.shape[0], 1, -1)
 
     def get_output(self, inputs, embed_id, embed_user, embed_hour, embed_week, lstm, fc):
         b = inputs.shape[0]
@@ -300,17 +301,18 @@ class TransformerModel(nn.Module):
         self.embed_size = embed_dim
         self.decoder_poi = nn.Linear(embed_dim, poi_len)
         self.init_weights()
-        self.w_g_graph = Parameter(torch.Tensor([0.33]), requires_grad=True)
-        self.w_g_dist = Parameter(torch.Tensor([0.33]), requires_grad=True)
-        self.w_u_graph = Parameter(torch.Tensor([0.33]), requires_grad=True)
+        self.w_g_graph = Parameter(torch.Tensor([0.25]), requires_grad=True)
+        self.w_g_dist = Parameter(torch.Tensor([0.25]), requires_grad=True)
+        self.w_u_graph = Parameter(torch.Tensor([0.25]), requires_grad=True)
+        self.w_u_nei = Parameter(torch.Tensor([0.25]), requires_grad=True)
         self.attention = Attention(poi_len)
-        in_dim = 1024
-        self.linear = nn.Linear(in_dim, in_dim)
-        self.fc_global = nn.Sequential(
+        in_dim = 2000
+        self.linear = nn.Linear(in_dim, 1024)
+        self.fc_neighbor = nn.Sequential(
             nn.Linear(in_dim, in_dim // 2),
             nn.LayerNorm(in_dim // 2),
             nn.LeakyReLU(),
-            nn.Linear(in_dim // 2, in_dim)
+            nn.Linear(in_dim // 2, 1024)
         )
 
     def generate_square_subsequent_mask(self, sz):
@@ -323,17 +325,15 @@ class TransformerModel(nn.Module):
         self.decoder_poi.bias.data.zero_()
         self.decoder_poi.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature, src_mask):
-        # return user_history_feature
-        # return self.test(user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature)
-        inputs = torch.mul(global_graph_feature, self.w_g_graph) + torch.mul(global_dist_feature,  self.w_g_dist) + torch.mul(user_graph_feature,  1 - self.w_g_graph - self.w_g_graph)
-        # inputs = torch.cat((global_dist_feature, global_graph_feature, user_graph_feature), dim=2)
+    def forward(self, user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature, src_mask, embed_neighbor):
+        embed_neighbor = self.linear(embed_neighbor)
+        inputs = (torch.mul(global_graph_feature, self.w_g_graph) + torch.mul(global_dist_feature,  self.w_g_dist) +
+                  torch.mul(user_graph_feature,  self.w_u_graph) + torch.mul(embed_neighbor, self.w_u_nei))
         inputs = inputs * math.sqrt(self.embed_size)
         inputs = self.pos_encoder(inputs)
         x = self.transformer_encoder(inputs)
         graph_feature = self.decoder_poi(x)
         out_put = graph_feature + user_history_feature
-        # out_put = self.fc_temp(out_put)
         return out_put
 
     def test(self, user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature):

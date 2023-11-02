@@ -54,9 +54,12 @@ class PoiDataset(data.Dataset):
             self.user_graph_path = './processed/TKY/users'
         with open(poi_data_path + '{}_data.pkl'.format(data_type), 'rb') as f:
             self.user_poi_data = pickle.load(f)
+        with open(poi_data_path + 'poi_neighbor.pkl', 'rb') as f:
+            self.poi_neighbor_data = pickle.load(f)
         self.poi_data = []
         self.past_data = []
         self.trajectory_len = []
+        self.process_neighbor()
         self.convert_tensor()
         self.user_graph_dict = {}
         self.user_graph_weight_dict = {}
@@ -66,26 +69,30 @@ class PoiDataset(data.Dataset):
 
     def __getitem__(self, index):
         x = self.poi_data[index][:-1]
+        last_poi = x[-1, 1]
+        neighbor = self.poi_neighbor_data[int(last_poi)]
         y = self.poi_data[index][1:][:, 1]
         graph = self.user_graph_dict[int(x[0][0])]
         weight = self.user_graph_weight_dict[int(x[0][0])]
-        return x, y, self.trajectory_len[index], graph.x, graph.edge_index, weight
+        return x, y, self.trajectory_len[index], graph.x, graph.edge_index, weight, neighbor
 
     def __len__(self):
         return self.data_len
 
     def convert_tensor(self):
-        '''
-        for line in self.user_poi_data:
-            t_vec = self.timestamp2vec(line[:, -1])
-            line = np.hstack((line[:, :-1], t_vec))
-            self.poi_data.append(torch.Tensor(line))
-            self.trajectory_len.append(len(line) - 1)
-        '''
         for line in zip(self.user_poi_data):
             poi = torch.Tensor(line)[0]
             self.poi_data.append(poi)
             self.trajectory_len.append(poi.shape[0] - 1)
+
+    def process_neighbor(self):
+        t_dict = dict()
+        for key in self.poi_neighbor_data.keys():
+            pois = self.poi_neighbor_data[key]
+            pois = np.array(pois)
+            pois = torch.Tensor(pois[:, 0])
+            t_dict[key] = pois
+        self.poi_neighbor_data = t_dict
 
     def pad_graph(self):
         for key in self.user_graph_dict.keys():
@@ -211,9 +218,30 @@ def spilt_data(data_name, rate=0.8, read=False):
     print(len(train_data), len(val_data), len(test_data))
 
 
+def get_poi_neighbor(data_name, top):
+    df = pd.read_csv('./data/{}_fliter.csv'.format(data_name))
+    df = df[['poi_id', 'latitude', 'longitude']]
+    df.drop_duplicates(subset=['poi_id'], inplace=True)
+    print(df.head())
+    dist_dict = dict()
+    for i in range(df.shape[0]):
+        poi = int(df.iloc[i]['poi_id'])
+        point1 = np.array([df.iloc[i]['latitude'], df.iloc[i]['longitude']])
+        dist_dict[poi] = []
+        for j in range(df.shape[0]):
+            point2 = np.array([df.iloc[j]['latitude'], df.iloc[j]['longitude']])
+            dist = np.linalg.norm(point1 - point2) * 1000000
+            dist_dict[poi].append([int(df.iloc[j]['poi_id']), dist])
+    for key in dist_dict.keys():
+        dist_dict[key] = sorted(dist_dict[key], key=lambda x: x[1])
+        dist_dict[key] = dist_dict[key][:top]
+    pickle.dump(dist_dict, open(os.path.join('./processed/{}/poi_data/poi_neighbor.pkl'.format(data_name)), 'wb'))
+
+
 if __name__ == '__main__':
-    spilt_data('NYC', rate=0.8, read=False)
-    dataset = PoiDataset('NYC', 'test')
+    # spilt_data('TKY', rate=0.8, read=False)
+    # get_poi_neighbor('NYC', 20)
+    dataset = PoiDataset('NYC', 'train')
     train_loader = data.DataLoader(dataset=dataset, batch_size=32, shuffle=False, collate_fn=lambda x: x)
     for _, batch_data in enumerate(train_loader, 1):
         print(1)

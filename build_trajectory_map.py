@@ -196,6 +196,7 @@ def main():
         data = build_trajectory(data)
     print('Raw data:\ndata_len: {}\t\t poi_len: {}\t\t cat_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
         len(data), len(set(data['poi_id'])), len(set(data['cat_id'])), len(set(data['user_id'])), len(set(data['trajectory_id']))))
+    statistic_data(data)
     data = filter_data(data)
     print('Flitered data:\ndata_len: {}\t\t poi_len: {}\t\t cat_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
         len(data), len(set(data['poi_id'])), len(set(data['cat_id'])), len(set(data['user_id'])),
@@ -219,7 +220,7 @@ def build_trajectory(df):
         trajectory_id = 1
         for _, u in group.iterrows():
             now_time = u['time']
-            if now_time- pd.Timedelta(24, "H") <= start_time:
+            if now_time - pd.Timedelta(24, "H") <= start_time:
                 trajectory.append(str(user_id) + '_' + str(trajectory_id))
             else:
                 trajectory_id += 1
@@ -271,6 +272,19 @@ def mkdirs():
         os.makedirs('./graph/{}/user_graph/graph'.format(data_name))
     if not os.path.exists('./graph/{}/user_graph/id2idx'.format(data_name)):
         os.makedirs('./graph/{}/user_graph/id2idx'.format(data_name))
+
+
+def statistic_data(data):
+    count = 0
+    for _, user in data.groupby('user_id'):
+        if len(user) <= 10:
+            count += 1
+    print(data['user_id'], count)
+    count = 0
+    for _, user in data.groupby('trajectory_id'):
+        if len(user) < 3:
+            count += 1
+    print(data['trajectory_id'], count)
 
 
 if __name__ == '__main__':
