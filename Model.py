@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv, GATConv, GraphConv, GraphNorm
 from torch_geometric.loader import DataLoader
-from torch.nn import TransformerEncoder, TransformerEncoderLayer, Parameter
+from torch.nn import TransformerEncoder, TransformerEncoderLayer, Parameter, TransformerDecoder, TransformerDecoderLayer
 
 
 class GcnUnit(nn.Module):
@@ -308,12 +308,6 @@ class TransformerModel(nn.Module):
         self.attention = Attention(poi_len)
         in_dim = 2000
         self.linear = nn.Linear(in_dim, 1024)
-        self.fc_neighbor = nn.Sequential(
-            nn.Linear(in_dim, in_dim // 2),
-            nn.LayerNorm(in_dim // 2),
-            nn.LeakyReLU(),
-            nn.Linear(in_dim // 2, 1024)
-        )
 
     def generate_square_subsequent_mask(self, sz):
         mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
@@ -352,3 +346,47 @@ class GlobalUserNet(nn.Module):
         user_graph_net = UserGraphNet()
         user_history_net = UserHistoryNet()
         transformer = TransformerModel()
+
+
+class Rnn(nn.Module):
+    def __init__(self, cat_len=400, poi_len=5099, user_len=1083, embed_size_user=20, embed_size_poi=300,
+                 embed_size_cat=100, embed_size_hour=20, hidden_size=128, lstm_layers=3, history_out_dim=128):
+        super(Rnn, self).__init__()
+        self.embed_user = nn.Embedding(user_len, embed_size_user)
+        self.embed_poi = nn.Embedding(poi_len, embed_size_poi)
+        self.embed_cat = nn.Embedding(cat_len, embed_size_cat)
+        self.embed_past = nn.Embedding(cat_len + poi_len + user_len, embed_size_user + embed_size_cat + embed_size_poi)
+        self.embed_hour = nn.Embedding(24, embed_size_hour)
+        self.embed_week = nn.Embedding(7, 7)
+        self.rnn = nn.RNN(embed_size_user + embed_size_poi + embed_size_hour + 7 + embed_size_cat, hidden_size)
+        self.gru = nn.GRU(embed_size_user + embed_size_poi + embed_size_hour + 7 + embed_size_cat, hidden_size, lstm_layers, dropout=0.5, batch_first=True)
+        self.lstm = nn.GRU(embed_size_user + embed_size_poi + embed_size_hour + 7 + embed_size_cat, hidden_size,
+                          lstm_layers, dropout=0.5, batch_first=True)
+        self.poi_fc = nn.Linear(hidden_size, history_out_dim)
+        self.out_w_poi = Parameter(torch.Tensor([0.5]).repeat(poi_len), requires_grad=True)
+        self.out_w_cat = Parameter(torch.Tensor([0.5]).repeat(poi_len), requires_grad=True)
+        self.out_w_hist = Parameter(torch.Tensor([0.33]).repeat(poi_len), requires_grad=True)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, inputs):
+        poi_feature = torch.cat((inputs[:, :, 0: 2], inputs[:, :, 3:]), dim=2)
+        cat_feature = inputs[:, :, 2:3]
+        poi_out = self.get_output(poi_feature, cat_feature, self.embed_poi, self.embed_cat, self.embed_user, self.embed_hour, self.embed_week,
+                                  self.gru, self.poi_fc)
+        return poi_out
+
+    def get_output(self, inputs, cat, embed_id, embed_cat, embed_user, embed_hour, embed_week, lstm, fc):
+        b = inputs.shape[0]
+        user_feature = inputs[:, :, 0: 1].int()
+        id_feature = inputs[:, :, 1: 2].int()
+        hour_feature = inputs[:, :, -2: -1].int()
+        week_feature = inputs[:, :, -1:].int()
+        cat = cat.int()
+        emb_cat = embed_cat(cat.reshape(b, -1))
+        emb_user = embed_user(user_feature.reshape(b, -1))
+        emb_id = embed_id(id_feature.reshape(b, -1))
+        emb_hour = embed_hour(hour_feature.reshape(b, -1))
+        emb_week = embed_week(week_feature.reshape(b, -1))
+        features = torch.cat((emb_user, emb_cat, emb_id, emb_hour, emb_week), dim=2)
+        output, _ = lstm(features)
+        return fc(output)

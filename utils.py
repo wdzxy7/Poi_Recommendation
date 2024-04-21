@@ -158,7 +158,7 @@ def normal_data(df):
 def spilt_data(data_name, rate=0.8, read=False):
     val_rate = (1 - rate) / 2
     if read:
-        df = pd.read_csv('fliter.csv')
+        df = pd.read_csv('./data/{}_filter.csv'.format(data_name))
         df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'day', 'latitude', 'longitude', 'timestamp'], axis=1,
                 inplace=True)
     else:
@@ -171,7 +171,7 @@ def spilt_data(data_name, rate=0.8, read=False):
         print(len(set(df['poi_id'])), len(set(df['user_id'])), len(set(df['cat_id'])), len(df), len(set(df['trajectory_id'])))
         df = filter_data(df)
         df = normal_data(df)
-        df.to_csv('fliter.csv', index_label=False)
+        df.to_csv('./data/{}_filter.csv'.format(data_name), index_label=False)
         df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'day', 'latitude', 'longitude', 'timestamp'], axis=1, inplace=True)
     print(
         'Flitered data:\ndata_len: {}\t\t poi_len: {}\t\t cat_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
@@ -219,7 +219,7 @@ def spilt_data(data_name, rate=0.8, read=False):
 
 
 def get_poi_neighbor(data_name, top):
-    df = pd.read_csv('./data/{}_fliter.csv'.format(data_name))
+    df = pd.read_csv('./data/{}_filter.csv'.format(data_name))
     df = df[['poi_id', 'latitude', 'longitude']]
     df.drop_duplicates(subset=['poi_id'], inplace=True)
     print(df.head())
@@ -239,10 +239,10 @@ def get_poi_neighbor(data_name, top):
 
 
 if __name__ == '__main__':
-    # spilt_data('TKY', rate=0.8, read=False)
-    # get_poi_neighbor('NYC', 20)
-    dataset = PoiDataset('NYC', 'train')
-    train_loader = data.DataLoader(dataset=dataset, batch_size=32, shuffle=False, collate_fn=lambda x: x)
-    for _, batch_data in enumerate(train_loader, 1):
-        print(1)
-        break
+    spilt_data('CA', rate=0.8, read=True)
+    get_poi_neighbor('CA', 20)
+    # dataset = PoiDataset('NYC', 'train')
+    # train_loader = data.DataLoader(dataset=dataset, batch_size=32, shuffle=False, collate_fn=lambda x: x)
+    # for _, batch_data in enumerate(train_loader, 1):
+    #     print(1)
+    #     break

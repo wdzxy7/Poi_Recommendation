@@ -15,14 +15,14 @@ os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
 parser = argparse.ArgumentParser(description='Parameters for my model')
-parser.add_argument('--poi_len', type=int, default=7791, help='The length of POI_id,NYC is 5099, TKY is 61858')
-parser.add_argument('--user_len', type=int, default=2124, help='The length of users')
-parser.add_argument('--cat_len', type=int, default=286, help='The length of category')
-parser.add_argument('--node_len', type=int, default=334, help='The length of user graph node(debug to see)')
-parser.add_argument('--lat_len', type=int, default=7791, help='The length of gps')
-parser.add_argument('--long_len', type=int, default=7791, help='The length of gps')
+parser.add_argument('--poi_len', type=int, default=4970, help='The length of POI_id,NYC is 5099, TKY is 61858')
+parser.add_argument('--user_len', type=int, default=873, help='The length of users')
+parser.add_argument('--cat_len', type=int, default=314, help='The length of category')
+parser.add_argument('--node_len', type=int, default=235, help='The length of user graph node(debug to see)')
+parser.add_argument('--lat_len', type=int, default=4970, help='The length of gps')
+parser.add_argument('--long_len', type=int, default=4970, help='The length of gps')
 
-parser.add_argument('--cat_dim', type=int, default=200, help='The embedding dim of poi category')
+parser.add_argument('--cat_dim', type=int, default=50, help='The embedding dim of poi category')
 parser.add_argument('--user_dim', type=int, default=150, help='The embedding dim of poi users')
 parser.add_argument('--poi_dim', type=int, default=100, help='The embedding dim of pois')
 parser.add_argument('--gps_dim', type=int, default=100, help='The embedding dim of gps')
@@ -30,12 +30,12 @@ parser.add_argument('--gcn_channel', type=int, default=128, help='The channels i
 
 parser.add_argument('--graph_out_dim', type=int, default=1024, help='The embedding dim of three graph Conv')
 parser.add_argument('--global_graph_layers', type=int, default=5, help='The gcn layers in GlobalGraphNet')
-parser.add_argument('--global_dist_features', type=int, default=2294, help='The feature sum of global distance graph(debug to see)')
+parser.add_argument('--global_dist_features', type=int, default=434, help='The feature sum of global distance graph(debug to see)')
 parser.add_argument('--global_dist_layers', type=int, default=4, help='The gcn layers in GlobalDistNet')
 parser.add_argument('--user_graph_layers', type=int, default=3, help='The gcn layers in UserGraphNet')
 parser.add_argument('--embed_size_user', type=int, default=150, help='The embedding dim of embed_size_user in UserHistoryNet')  #150
 parser.add_argument('--embed_size_poi', type=int, default=100, help='The embedding dim of embed_size_poi in UserHistoryNet')  #100
-parser.add_argument('--embed_size_cat', type=int, default=200, help='The embedding dim of embed_size_cat in UserHistoryNet')  #200
+parser.add_argument('--embed_size_cat', type=int, default=50, help='The embedding dim of embed_size_cat in UserHistoryNet')  #200
 parser.add_argument('--embed_size_hour', type=int, default=20, help='The embedding dim of embed_size_hour in UserHistoryNet')
 parser.add_argument('--history_out_dim', type=int, default=1024, help='The embedding dim of GRU in UserHistoryNet')
 parser.add_argument('--hidden_size', type=int, default=128, help='The hidden size in UserHistoryNet`s LSTM')  #128
@@ -50,8 +50,8 @@ parser.add_argument('--batch_size', type=int, default=32, help='Batch size of da
 parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate of optimizer')
 parser.add_argument('--weight_decay', type=float, default=0, help='Weight_decay of optimizer')
 parser.add_argument('--lr_scheduler_factor', type=float, default=0.1, help='The decrease rate of ReduceLROnPlateau')
-parser.add_argument('--data_name', type=str, default='TKY', help='Train data name')
-parser.add_argument('--gpu_num', type=int, default=1, help='Choose which GPU to use')
+parser.add_argument('--data_name', type=str, default='NYC', help='Train data name')
+parser.add_argument('--gpu_num', type=int, default=0, help='Choose which GPU to use')
 parser.add_argument('--seed', type=int, default=1000, help='random seed')
 
 
@@ -173,6 +173,11 @@ def test_model(epoch, criterion, global_graph_model, global_dist_model, user_gra
     test_batches_top10_acc_list = []
     test_batches_top15_acc_list = []
     test_batches_top20_acc_list = []
+    test_batches_top1_ndcg_list = []
+    test_batches_top5_ndcg_list = []
+    test_batches_top10_ndcg_list = []
+    test_batches_top15_ndcg_list = []
+    test_batches_top20_ndcg_list = []
     test_batches_mAP20_list = []
     test_batches_mrr_list = []
     loss_list = []
@@ -203,6 +208,11 @@ def test_model(epoch, criterion, global_graph_model, global_dist_model, user_gra
             precision_10 = 0
             precision_15 = 0
             precision_20 = 0
+            ndcg_1 = 0
+            ndcg_5 = 0
+            ndcg_10 = 0
+            ndcg_15 = 0
+            ndcg_20 = 0
             mAP20 = 0
             mrr = 0
             loss = criterion(y_pred.transpose(1, 2), y.long())
@@ -217,6 +227,11 @@ def test_model(epoch, criterion, global_graph_model, global_dist_model, user_gra
                 precision_10 += top_k_acc_last_timestep(true, predict, k=10)
                 precision_15 += top_k_acc_last_timestep(true, predict, k=15)
                 precision_20 += top_k_acc_last_timestep(true, predict, k=20)
+                ndcg_1 += ndcg_at_k_per_batch(true, predict, k=1)
+                ndcg_5 += ndcg_at_k_per_batch(true, predict, k=5)
+                ndcg_10 += ndcg_at_k_per_batch(true, predict, k=10)
+                ndcg_15 += ndcg_at_k_per_batch(true, predict, k=15)
+                ndcg_20 += ndcg_at_k_per_batch(true, predict, k=20)
                 mAP20 += mAP_metric_last_timestep(true, predict, k=20)
                 mrr += MRR_metric_last_timestep(true, predict)
             test_batches_top1_acc_list.append(precision_1 / y.shape[0])
@@ -224,13 +239,21 @@ def test_model(epoch, criterion, global_graph_model, global_dist_model, user_gra
             test_batches_top10_acc_list.append(precision_10 / y.shape[0])
             test_batches_top15_acc_list.append(precision_15 / y.shape[0])
             test_batches_top20_acc_list.append(precision_20 / y.shape[0])
+            test_batches_top1_ndcg_list.append(ndcg_1 / y.shape[0])
+            test_batches_top5_ndcg_list.append(ndcg_5 / y.shape[0])
+            test_batches_top10_ndcg_list.append(ndcg_10 / y.shape[0])
+            test_batches_top15_ndcg_list.append(ndcg_15 / y.shape[0])
+            test_batches_top20_ndcg_list.append(ndcg_20 / y.shape[0])
             test_batches_mAP20_list.append(mAP20 / y.shape[0])
             test_batches_mrr_list.append(mrr / y.shape[0])
     mess = ("\rTESTING: Epoch:{}\t\t  precision_1:{}\t\t precision_5:{}\t\t precision_10:{} \t\t precision_15:{} \t\t precision_20:{} "
-            "\t\t mAP20:{} \t\t mrr:{}".format(epoch, np.mean(test_batches_top1_acc_list), np.mean(test_batches_top5_acc_list)
-                                               , np.mean(test_batches_top10_acc_list), np.mean(test_batches_top15_acc_list),
-                                               np.mean(test_batches_top20_acc_list), np.mean(test_batches_mAP20_list),
-                                               np.mean(test_batches_mrr_list)))
+            "\t\t mAP20:{} \t\t mrr:{}\t\t precision_1:{}\t\t precision_5:{}\t\t precision_10:{}\t\t precision_15:{}\t\t precision_20:{}".
+            format(epoch, np.mean(test_batches_top1_acc_list), np.mean(test_batches_top5_acc_list)
+                   , np.mean(test_batches_top10_acc_list), np.mean(test_batches_top15_acc_list),
+                   np.mean(test_batches_top20_acc_list), np.mean(test_batches_mAP20_list),
+                   np.mean(test_batches_mrr_list), np.mean(test_batches_top1_ndcg_list),
+                   np.mean(test_batches_top5_ndcg_list), np.mean(test_batches_top10_ndcg_list),
+                   np.mean(test_batches_top15_ndcg_list), np.mean(test_batches_top20_ndcg_list)))
     print(mess)
     logger.info(str(mess))
     if precision_20 > 0.7100:
@@ -247,6 +270,40 @@ def top_k_acc_last_timestep(y_true_seq, y_pred_seq, k):
         return 1
     else:
         return 0
+
+
+def ndcg_at_k_per_batch(y_true_seq, y_pred_seq, k):
+    y_true = y_true_seq[-1]
+    y_pred = y_pred_seq[-1]
+    top_k_rec = y_pred.argsort()[-k:][::-1]
+    ndcg_score = 0.
+    ndcg_score += ndcg_at_k_per_sample(top_k_rec, y_true)
+    return ndcg_score
+
+
+def ndcg_at_k_per_sample(pred, tgt, method=1):
+    r = np.zeros_like(pred, dtype=np.float32)
+    ideal_r = np.zeros_like(pred, dtype=np.float32)
+    for i, v in enumerate(pred):
+        if v in tgt and v not in pred[:i]:
+            r[i] = 1.
+    ideal_r[:len(tgt)] = 1.
+
+    idcg = dcg_at_k_per_sample(ideal_r, method)
+    if not idcg:
+        return 0.
+    return dcg_at_k_per_sample(r, method) / idcg
+
+
+def dcg_at_k_per_sample(r, method=1):
+    if r.size:
+        if method == 0:
+            return r[0] + np.sum(r[1:] / np.log2(np.arange(2, r.size + 1)))
+        elif method == 1:
+            return np.sum(r / np.log2(np.arange(2, r.size + 2)))
+        else:
+            raise ValueError('method must be 0 or 1.')
+    return 0.
 
 
 def mAP_metric_last_timestep(y_true_seq, y_pred_seq, k):

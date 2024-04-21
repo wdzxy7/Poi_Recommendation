@@ -124,39 +124,53 @@ def test_model():
     test_batches_top10_acc_list = []
     test_batches_top15_acc_list = []
     test_batches_top20_acc_list = []
+    test_batches_top1_ndcg_list = []
+    test_batches_top5_ndcg_list = []
+    test_batches_top10_ndcg_list = []
+    test_batches_top15_ndcg_list = []
+    test_batches_top20_ndcg_list = []
     test_batches_mAP20_list = []
     test_batches_mrr_list = []
+    loss_list = []
     with torch.no_grad():
         src_mask = transformer.generate_square_subsequent_mask(batch_size).to(device)
         for _, batch_data in enumerate(test_loader):
             b_len = len(batch_data)
             if b_len != batch_size:
                 src_mask = transformer.generate_square_subsequent_mask(b_len).to(device)
-            history_feature, y, trajectory_len, user_graph, user_graph_edges, user_graph_weight = spilt_batch(batch_data)
+            history_feature, y, trajectory_len, user_graph, user_graph_edges, user_graph_weight, neighbor = spilt_batch(
+                batch_data)
             y = y.to(device)
             history_feature = history_feature.to(device)
             user_graph = user_graph.to(device)
             user_graph_edges = user_graph_edges.to(device)
-            global_graph = global_graph.to(device)
-            global_graph_weight = global_graph_weight.to(device)
-            global_dist = global_dist.to(device)
-            global_dist_weight = global_dist_weight.to(device)
             user_graph_weight = user_graph_weight.to(device)
+            neighbor = neighbor.to(device)
             global_graph_feature = global_graph_model(global_graph, global_graph_weight)
             global_dist_feature = global_dist_model(global_dist, dist_mask, global_dist_weight)
             user_graph_feature = user_graph_model(user_graph, user_graph_edges, user_graph_weight)
-            user_history_feature = user_history_model(history_feature)
+            user_history_feature, embed_neighbor = user_history_model(history_feature, neighbor)
             global_graph_feature = global_graph_feature.repeat(y.shape[0], user_history_feature.shape[1], 1)
             global_dist_feature = global_dist_feature.repeat(y.shape[0], user_history_feature.shape[1], 1)
-            user_graph_feature = user_graph_feature.reshape(y.shape[0], 1, -1).repeat(1, user_history_feature.shape[1], 1)
-            y_pred = transformer(user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature, src_mask)
+            user_graph_feature = user_graph_feature.reshape(y.shape[0], 1, -1).repeat(1, user_history_feature.shape[1],
+                                                                                      1)
+            embed_neighbor = embed_neighbor.repeat(1, user_history_feature.shape[1], 1)
+            y_pred = transformer(user_history_feature, global_graph_feature, global_dist_feature, user_graph_feature,
+                                 src_mask, embed_neighbor)
             precision_1 = 0
             precision_5 = 0
             precision_10 = 0
             precision_15 = 0
             precision_20 = 0
+            ndcg_1 = 0
+            ndcg_5 = 0
+            ndcg_10 = 0
+            ndcg_15 = 0
+            ndcg_20 = 0
             mAP20 = 0
             mrr = 0
+            loss = criterion(y_pred.transpose(1, 2), y.long())
+            loss_list.append(loss.detach().cpu().numpy())
             y_pred = y_pred.detach().cpu().numpy()
             y = y.detach().cpu().numpy()
             for predict, true, tra_len in zip(y_pred, y, trajectory_len):
@@ -167,6 +181,11 @@ def test_model():
                 precision_10 += top_k_acc_last_timestep(true, predict, k=10)
                 precision_15 += top_k_acc_last_timestep(true, predict, k=15)
                 precision_20 += top_k_acc_last_timestep(true, predict, k=20)
+                ndcg_1 += ndcg_at_k_per_batch(true, predict, k=1)
+                ndcg_5 += ndcg_at_k_per_batch(true, predict, k=5)
+                ndcg_10 += ndcg_at_k_per_batch(true, predict, k=10)
+                ndcg_15 += ndcg_at_k_per_batch(true, predict, k=15)
+                ndcg_20 += ndcg_at_k_per_batch(true, predict, k=20)
                 mAP20 += mAP_metric_last_timestep(true, predict, k=20)
                 mrr += MRR_metric_last_timestep(true, predict)
             test_batches_top1_acc_list.append(precision_1 / y.shape[0])
@@ -174,15 +193,58 @@ def test_model():
             test_batches_top10_acc_list.append(precision_10 / y.shape[0])
             test_batches_top15_acc_list.append(precision_15 / y.shape[0])
             test_batches_top20_acc_list.append(precision_20 / y.shape[0])
+            test_batches_top1_ndcg_list.append(ndcg_1 / y.shape[0])
+            test_batches_top5_ndcg_list.append(ndcg_5 / y.shape[0])
+            test_batches_top10_ndcg_list.append(ndcg_10 / y.shape[0])
+            test_batches_top15_ndcg_list.append(ndcg_15 / y.shape[0])
+            test_batches_top20_ndcg_list.append(ndcg_20 / y.shape[0])
             test_batches_mAP20_list.append(mAP20 / y.shape[0])
             test_batches_mrr_list.append(mrr / y.shape[0])
-    mess = ("\rTESTING: precision_1:{}\t\t precision_5:{}\t\t precision_10:{} \t\t precision_15:{} \t\t precision_20:{} "
-            "\t\t mAP20:{} \t\t mrr:{}".format(np.mean(test_batches_top1_acc_list), np.mean(test_batches_top5_acc_list)
-                                               , np.mean(test_batches_top10_acc_list), np.mean(test_batches_top15_acc_list),
-                                               np.mean(test_batches_top20_acc_list), np.mean(test_batches_mAP20_list),
-                                               np.mean(test_batches_mrr_list)))
+    mess = (
+        "\rTESTING: Epoch:{}\t\t  precision_1:{}\t\t precision_5:{}\t\t precision_10:{} \t\t precision_15:{} \t\t precision_20:{} "
+        "\t\t mAP20:{} \t\t mrr:{}\t\t precision_1:{}\t\t precision_5:{}\t\t precision_10:{}\t\t precision_15:{}\t\t precision_20:{}".
+        format(epoch, np.mean(test_batches_top1_acc_list), np.mean(test_batches_top5_acc_list)
+               , np.mean(test_batches_top10_acc_list), np.mean(test_batches_top15_acc_list),
+               np.mean(test_batches_top20_acc_list), np.mean(test_batches_mAP20_list),
+               np.mean(test_batches_mrr_list), np.mean(test_batches_top1_ndcg_list),
+               np.mean(test_batches_top5_ndcg_list), np.mean(test_batches_top10_ndcg_list),
+               np.mean(test_batches_top15_ndcg_list), np.mean(test_batches_top20_ndcg_list)))
     print(mess)
     return None
+
+
+def ndcg_at_k_per_batch(y_true_seq, y_pred_seq, k):
+    y_true = y_true_seq[-1]
+    y_pred = y_pred_seq[-1]
+    top_k_rec = y_pred.argsort()[-k:][::-1]
+    ndcg_score = 0.
+    ndcg_score += ndcg_at_k_per_sample(top_k_rec, y_true)
+    return ndcg_score
+
+
+def ndcg_at_k_per_sample(pred, tgt, method=1):
+    r = np.zeros_like(pred, dtype=np.float32)
+    ideal_r = np.zeros_like(pred, dtype=np.float32)
+    for i, v in enumerate(pred):
+        if v in tgt and v not in pred[:i]:
+            r[i] = 1.
+    ideal_r[:len(tgt)] = 1.
+
+    idcg = dcg_at_k_per_sample(ideal_r, method)
+    if not idcg:
+        return 0.
+    return dcg_at_k_per_sample(r, method) / idcg
+
+
+def dcg_at_k_per_sample(r, method=1):
+    if r.size:
+        if method == 0:
+            return r[0] + np.sum(r[1:] / np.log2(np.arange(2, r.size + 1)))
+        elif method == 1:
+            return np.sum(r / np.log2(np.arange(2, r.size + 2)))
+        else:
+            raise ValueError('method must be 0 or 1.')
+    return 0.
 
 
 def top_k_acc_last_timestep(y_true_seq, y_pred_seq, k):

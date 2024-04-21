@@ -19,8 +19,12 @@ def pre_process(data):
     deal_time = []
     for i in range(len(data)):
         times = data['time'].values[i]
-        timestamp.append(time.mktime(time.strptime(times, '%a %b %d %H:%M:%S %z %Y')))
-        t = datetime.datetime.strptime(times, '%a %b %d %H:%M:%S %z %Y')
+        try:
+            timestamp.append(time.mktime(time.strptime(times, '%a %b %d %H:%M:%S %z %Y')))
+            t = datetime.datetime.strptime(times, '%a %b %d %H:%M:%S %z %Y')
+        except:
+            timestamp.append(time.mktime(time.strptime(times, '%Y-%m-%dT%H:%M:%SZ')))
+            t = datetime.datetime.strptime(times, '%Y-%m-%dT%H:%M:%SZ')
         year = int(t.strftime('%Y'))
         day_i = int(t.strftime('%j'))
         week_i = int(t.strftime('%w'))
@@ -49,16 +53,16 @@ def pre_process(data):
     data['user_id'] = data['user_id'].astype(int)
     data['poi_id'] = data['poi_id'].rank(method='dense').values
     data['poi_id'] = data['poi_id'].astype(int)
-    for venueid, group in data.groupby('poi_id'):
-        indexs = group.index
-        if len(set(group['cat_id'].values)) > 1:
-            for i in range(len(group)):
-                data.loc[indexs[i], 'cat_id'] = group.loc[indexs[0]]['cat_id']
-
+    if data_name != 'CA':
+        for venueid, group in data.groupby('poi_id'):
+            indexs = group.index
+            if len(set(group['cat_id'].values)) > 1:
+                for i in range(len(group)):
+                    data.loc[indexs[i], 'cat_id'] = group.loc[indexs[0]]['cat_id']
+        data['cat_id'] = data['cat_id'].rank(method='dense').values
+        data['cat_id'] = data['cat_id'].astype(int)
+        data['timestamp'] = data['timestamp'].astype(int)
     data = data.drop_duplicates()
-    data['cat_id'] = data['cat_id'].rank(method='dense').values
-    data['cat_id'] = data['cat_id'].astype(int)
-    data['timestamp'] = data['timestamp'].astype(int)
     return data
 
 
@@ -72,11 +76,17 @@ def build_global_graph(df):
         for i, row in user_df.iterrows():
             node = row['poi_id']
             if node not in G.nodes():
-                G.add_node(row['poi_id'],
-                           checkin_cnt=1,
-                           poi_catid=row['cat_id'],
-                           latitude=row['latitude'],
-                           longitude=row['longitude'])
+                if data_name != 'CA':
+                    G.add_node(row['poi_id'],
+                               checkin_cnt=1,
+                               poi_catid=row['cat_id'],
+                               latitude=row['latitude'],
+                               longitude=row['longitude'])
+                else: # CA dataset
+                    G.add_node(row['poi_id'],
+                               checkin_cnt=1,
+                               latitude=row['latitude'],
+                               longitude=row['longitude'])
             else:
                 G.nodes[node]['checkin_cnt'] += 1
         # Add Edges
@@ -113,12 +123,19 @@ def build_user_all_graph(df):
         for i, row in user_df.iterrows():
             node = row['poi_id']
             if node not in G.nodes():
-                G.add_node(row['poi_id'],
-                           checkin_cnt=1,
-                           poi_catid=row['cat_id'],
-                           poi_catname=row['cat_name'],
-                           latitude=row['latitude'],
-                           longitude=row['longitude'])
+                if data_name != 'CA':
+                    G.add_node(row['poi_id'],
+                               checkin_cnt=1,
+                               poi_catid=row['cat_id'],
+                               poi_catname=row['cat_name'],
+                               latitude=row['latitude'],
+                               longitude=row['longitude'])
+                else: # CA dataset
+                    G.add_node(row['poi_id'],
+                               checkin_cnt=1,
+                               poi_catname=row['cat_name'],
+                               latitude=row['latitude'],
+                               longitude=row['longitude'])
             else:
                 G.nodes[node]['checkin_cnt'] += 1
         # Add edges (Check-in seq)
@@ -191,16 +208,29 @@ def main():
     if data_name == 'NYC':
         data = pd.read_table('./data/dataset_TSMC2014_NYC.txt', header=None, encoding="latin-1")
         data = build_trajectory(data)
-    if data_name == 'TKY':
+    elif data_name == 'TKY':
         data = pd.read_table('./data/dataset_TSMC2014_TKY.txt', header=None, encoding="latin-1")
         data = build_trajectory(data)
-    print('Raw data:\ndata_len: {}\t\t poi_len: {}\t\t cat_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
-        len(data), len(set(data['poi_id'])), len(set(data['cat_id'])), len(set(data['user_id'])), len(set(data['trajectory_id']))))
+    elif data_name == 'CA':
+        data = pd.read_table('./data/Gowalla_totalCheckins.txt', header=None, encoding="latin-1")
+        data = build_trajectory(data)
+    if data_name != 'CA':
+        print('Raw data:\ndata_len: {}\t\t poi_len: {}\t\t cat_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
+            len(data), len(set(data['poi_id'])), len(set(data['cat_id'])), len(set(data['user_id'])), len(set(data['trajectory_id']))))
+    else:
+        print(
+            'Raw data:\ndata_len: {}\t\t poi_len: {}\t\tuser_len: {}\t\t trajectory_len: {}\t\t '.format(
+             len(data), len(set(data['poi_id'])), len(set(data['user_id'])), len(set(data['trajectory_id']))))
     statistic_data(data)
     data = filter_data(data)
-    print('Flitered data:\ndata_len: {}\t\t poi_len: {}\t\t cat_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
-        len(data), len(set(data['poi_id'])), len(set(data['cat_id'])), len(set(data['user_id'])),
-        len(set(data['trajectory_id']))))
+    if data_name != 'CA':
+        print('Flitered data:\ndata_len: {}\t\t poi_len: {}\t\t cat_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
+            len(data), len(set(data['poi_id'])), len(set(data['cat_id'])), len(set(data['user_id'])),
+            len(set(data['trajectory_id']))))
+    else:
+        print(
+            'Flitered data:\ndata_len: {}\t\t poi_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
+             len(data), len(set(data['poi_id'])), len(set(data['user_id'])), len(set(data['trajectory_id']))))
     global_graph = build_global_graph(data)
     save_graph_to_pickle(global_graph)
     save_graph_edge(global_graph)
@@ -210,7 +240,10 @@ def main():
 
 
 def build_trajectory(df):
-    df.columns = ["user_id", "poi_id", "cat_id", "cat_name", "latitude", "longitude", "timezone", "time"]
+    if data_name != 'CA':
+        df.columns = ["user_id", "poi_id", "cat_id", "cat_name", "latitude", "longitude", "timezone", "time"]
+    else:
+        df.columns = ["user_id", "time", "latitude", "longitude", "poi_id"]
     df = pre_process(df)
     df.sort_values(by=['user_id', 'time'], inplace=True, ascending=True)
     trajectory = []
@@ -231,31 +264,40 @@ def build_trajectory(df):
 
 
 def filter_data(data):
+    res_data = pd.DataFrame([])
     for poi_id, group in data.groupby('poi_id'):
-        if group.shape[0] < 10:
-            data.drop(data[(data.poi_id == poi_id)].index, inplace=True)
+        if group.shape[0] >= 10:
+            res_data = res_data.append(group)
+    data = res_data.copy()
+    res_data = pd.DataFrame([])
     for user_id, group in data.groupby('user_id'):
-        if group.shape[0] < 10:
-            data.drop(data[(data.user_id == user_id)].index, inplace=True)
+        if group.shape[0] >= 10:
+            res_data = res_data.append(group)
+    data = res_data.copy()
+    res_data = pd.DataFrame([])
     for group_id, group in data.groupby('trajectory_id'):
-        if group.shape[0] < 3:
-            data.drop(data[(data.trajectory_id == group_id)].index, inplace=True)
+        if group.shape[0] >= 3:
+            res_data = res_data.append(group)
+    data = res_data.copy()
+    res_data = pd.DataFrame([])
     for user_id, group in data.groupby('user_id'):
-        if len(set(group.trajectory_id)) < 4:
-            data.drop(data[(data.user_id == user_id)].index, inplace=True)
+        if len(set(group.trajectory_id)) >= 4:
+            res_data = res_data.append(group)
+    data = res_data.copy()
     # resort
     data['user_id'] = data['user_id'].rank(method='dense').values
     data['user_id'] = data['user_id'].astype(int)
     data['poi_id'] = data['poi_id'].rank(method='dense').values
     data['poi_id'] = data['poi_id'].astype(int)
-    for venueid, group in data.groupby('poi_id'):
-        indexs = group.index
-        if len(set(group['cat_id'].values)) > 1:
-            for i in range(len(group)):
-                data.loc[indexs[i], 'cat_id'] = group.loc[indexs[0]]['cat_id']
+    if data_name != 'CA':
+        for venueid, group in data.groupby('poi_id'):
+            indexs = group.index
+            if len(set(group['cat_id'].values)) > 1:
+                for i in range(len(group)):
+                    data.loc[indexs[i], 'cat_id'] = group.loc[indexs[0]]['cat_id']
+        data['cat_id'] = data['cat_id'].rank(method='dense').values
+        data['cat_id'] = data['cat_id'].astype(int)
     data = data.drop_duplicates()
-    data['cat_id'] = data['cat_id'].rank(method='dense').values
-    data['cat_id'] = data['cat_id'].astype(int)
     return data
 
 
@@ -288,6 +330,6 @@ def statistic_data(data):
 
 
 if __name__ == '__main__':
-    data_name = 'NYC'
+    data_name = 'CA'
     mkdirs()
     main()
