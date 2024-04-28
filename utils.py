@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.utils.data as data
+from tqdm import tqdm
+
 from build_trajectory_map import pre_process, filter_data, build_trajectory
 
 
@@ -158,24 +160,29 @@ def normal_data(df):
 def spilt_data(data_name, rate=0.8, read=False):
     val_rate = (1 - rate) / 2
     if read:
-        df = pd.read_csv('./data/{}_filter.csv'.format(data_name))
-        df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'day', 'latitude', 'longitude', 'timestamp'], axis=1,
-                inplace=True)
+        df = pd.read_csv('./data/filter_data/{}_filter.csv'.format(data_name))
+        try:
+            df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'day', 'latitude', 'longitude', 'timestamp'], axis=1,
+                    inplace=True)
+        except:
+            df.drop(['time', 'hour_48', 'day', 'latitude', 'longitude', 'timestamp'], axis=1,
+                    inplace=True)
     else:
         if data_name == 'NYC':
             data_path = './data/dataset_TSMC2014_NYC.txt'
         elif data_name == 'TKY':
             data_path = './data/dataset_TSMC2014_TKY.txt'
+        elif data_name == 'CA':
+            data_path = './data/Gowalla_totalCheckins.txt'
         df = pd.read_table(data_path, header=None, encoding="latin-1")
         df = build_trajectory(df)
-        print(len(set(df['poi_id'])), len(set(df['user_id'])), len(set(df['cat_id'])), len(df), len(set(df['trajectory_id'])))
         df = filter_data(df)
         df = normal_data(df)
         df.to_csv('./data/{}_filter.csv'.format(data_name), index_label=False)
         df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'day', 'latitude', 'longitude', 'timestamp'], axis=1, inplace=True)
     print(
-        'Flitered data:\ndata_len: {}\t\t poi_len: {}\t\t cat_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
-            len(df), len(set(df['poi_id'])), len(set(df['cat_id'])), len(set(df['user_id'])),
+        'Flitered data:\ndata_len: {}\t\t poi_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
+            len(df), len(set(df['poi_id'])), len(set(df['user_id'])),
             len(set(df['trajectory_id']))))
     train_data = []
     test_data = []
@@ -224,6 +231,8 @@ def get_poi_neighbor(data_name, top):
     df.drop_duplicates(subset=['poi_id'], inplace=True)
     print(df.head())
     dist_dict = dict()
+    bar = tqdm(total=df.shape[0] * df.shape[0])
+    bar.set_description('Computing')
     for i in range(df.shape[0]):
         poi = int(df.iloc[i]['poi_id'])
         point1 = np.array([df.iloc[i]['latitude'], df.iloc[i]['longitude']])
@@ -232,6 +241,7 @@ def get_poi_neighbor(data_name, top):
             point2 = np.array([df.iloc[j]['latitude'], df.iloc[j]['longitude']])
             dist = np.linalg.norm(point1 - point2) * 1000000
             dist_dict[poi].append([int(df.iloc[j]['poi_id']), dist])
+            bar.update(1)
     for key in dist_dict.keys():
         dist_dict[key] = sorted(dist_dict[key], key=lambda x: x[1])
         dist_dict[key] = dist_dict[key][:top]

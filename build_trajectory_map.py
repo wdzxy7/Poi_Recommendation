@@ -10,6 +10,51 @@ from tqdm import tqdm
 from pandas import DataFrame
 
 
+class MinMaxNormalization(object):
+    def __init__(self, min_=None, max_=None):
+        self.min = min_
+        self.max = max_
+        pass
+
+    def fit(self, X):
+        if self.min is None:
+            self._min = X.min()
+            self._max = X.max()
+        else:
+            self._min = self.min
+            self._max = self.max
+        print("min:", self._min, "max: ", self._max)
+
+    def transform(self, X):
+        X = 1. * (X - self._min) / (self._max - self._min)
+        X = X * 2. - 1.
+        return X
+
+    def fit_transform(self, X):
+        self.fit(X)
+        return self.transform(X)
+
+    def inverse_transform(self, X):
+        X = (X + 1.) / 2.
+        X = 1. * X * (self._max - self._min) + self._min
+        return X
+
+
+def normal_data(df):
+    mmn = MinMaxNormalization()
+    arr = np.array(df[['latitude', 'longitude']])
+    mmn.fit(arr)
+    mmn_all_data = [mmn.transform(d) for d in arr]
+    df[['latitude', 'longitude']] = mmn_all_data
+    mmn = MinMaxNormalization(min_=94, max_=411)
+    arr = np.array(df[['day']])
+    mmn.fit(arr)
+    mmn_all_data = [mmn.transform(d) for d in arr]
+    df[['day']] = mmn_all_data
+    return df
+
+
+
 def pre_process(data):
     timestamp = []
     hour = []
@@ -53,7 +98,7 @@ def pre_process(data):
     data['user_id'] = data['user_id'].astype(int)
     data['poi_id'] = data['poi_id'].rank(method='dense').values
     data['poi_id'] = data['poi_id'].astype(int)
-    if data_name != 'CA':
+    try:
         for venueid, group in data.groupby('poi_id'):
             indexs = group.index
             if len(set(group['cat_id'].values)) > 1:
@@ -62,6 +107,8 @@ def pre_process(data):
         data['cat_id'] = data['cat_id'].rank(method='dense').values
         data['cat_id'] = data['cat_id'].astype(int)
         data['timestamp'] = data['timestamp'].astype(int)
+    except:
+        pass
     data = data.drop_duplicates()
     return data
 
@@ -133,7 +180,6 @@ def build_user_all_graph(df):
                 else: # CA dataset
                     G.add_node(row['poi_id'],
                                checkin_cnt=1,
-                               poi_catname=row['cat_name'],
                                latitude=row['latitude'],
                                longitude=row['longitude'])
             else:
@@ -223,6 +269,8 @@ def main():
              len(data), len(set(data['poi_id'])), len(set(data['user_id'])), len(set(data['trajectory_id']))))
     statistic_data(data)
     data = filter_data(data)
+    df = normal_data(data)
+    df.to_csv('./data/filter_data/{}_filter.csv'.format(data_name), index_label=False)
     if data_name != 'CA':
         print('Flitered data:\ndata_len: {}\t\t poi_len: {}\t\t cat_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
             len(data), len(set(data['poi_id'])), len(set(data['cat_id'])), len(set(data['user_id'])),
@@ -240,9 +288,9 @@ def main():
 
 
 def build_trajectory(df):
-    if data_name != 'CA':
+    try:
         df.columns = ["user_id", "poi_id", "cat_id", "cat_name", "latitude", "longitude", "timezone", "time"]
-    else:
+    except:
         df.columns = ["user_id", "time", "latitude", "longitude", "poi_id"]
     df = pre_process(df)
     df.sort_values(by=['user_id', 'time'], inplace=True, ascending=True)
@@ -274,22 +322,25 @@ def filter_data(data):
         if group.shape[0] >= 10:
             res_data = res_data.append(group)
     data = res_data.copy()
+    print(len(set(data['user_id'])))
     res_data = pd.DataFrame([])
     for group_id, group in data.groupby('trajectory_id'):
-        if group.shape[0] >= 3:
+        if group.shape[0] >= 4: # 6 4951
             res_data = res_data.append(group)
     data = res_data.copy()
+    print(len(set(data['user_id'])))
     res_data = pd.DataFrame([])
     for user_id, group in data.groupby('user_id'):
         if len(set(group.trajectory_id)) >= 4:
             res_data = res_data.append(group)
     data = res_data.copy()
+    print(len(set(data['user_id'])))
     # resort
     data['user_id'] = data['user_id'].rank(method='dense').values
     data['user_id'] = data['user_id'].astype(int)
     data['poi_id'] = data['poi_id'].rank(method='dense').values
     data['poi_id'] = data['poi_id'].astype(int)
-    if data_name != 'CA':
+    try:
         for venueid, group in data.groupby('poi_id'):
             indexs = group.index
             if len(set(group['cat_id'].values)) > 1:
@@ -297,6 +348,8 @@ def filter_data(data):
                     data.loc[indexs[i], 'cat_id'] = group.loc[indexs[0]]['cat_id']
         data['cat_id'] = data['cat_id'].rank(method='dense').values
         data['cat_id'] = data['cat_id'].astype(int)
+    except:
+        pass
     data = data.drop_duplicates()
     return data
 
