@@ -3,6 +3,7 @@ import os
 import glob
 import torch
 import pickle
+import random
 import numpy as np
 import pandas as pd
 import torch.nn as nn
@@ -48,15 +49,11 @@ class PoiDataset(data.Dataset):
         self.max_graph_node = 0
         self.max_graph_edges = 0
         self.max_graph_weight_len = 0
-        if data_name == 'NYC':
-            poi_data_path = './processed/NYC/poi_data/'
-            self.user_graph_path = './processed/NYC/users'
-        elif data_name == 'TKY':
-            poi_data_path = './processed/TKY/poi_data/'
-            self.user_graph_path = './processed/TKY/users'
+        poi_data_path = './processed/{}/poi_data/'.format(data_name)
+        self.user_graph_path = './processed/{}/users'.format(data_name)
         with open(poi_data_path + '{}_data.pkl'.format(data_type), 'rb') as f:
             self.user_poi_data = pickle.load(f)
-        with open(poi_data_path + 'poi_neighbor.pkl', 'rb') as f:
+        with open(poi_data_path + 'poi_neighbor_20.pkl', 'rb') as f:
             self.poi_neighbor_data = pickle.load(f)
         self.poi_data = []
         self.past_data = []
@@ -157,7 +154,7 @@ def normal_data(df):
     return df
 
 
-def spilt_data(data_name, rate=0.8, read=False):
+def spilt_data(data_name, rate=0.8, read=False, robust_rate=0.9):
     val_rate = (1 - rate) / 2
     if read:
         df = pd.read_csv('./data/filter_data/{}_filter.csv'.format(data_name))
@@ -187,6 +184,7 @@ def spilt_data(data_name, rate=0.8, read=False):
     train_data = []
     test_data = []
     val_data = []
+    robust_data = []
     for _, group in df.groupby('user_id'):
         trajectory_len = len(set(group['trajectory_id']))
         train_len = int(trajectory_len * rate)
@@ -196,6 +194,7 @@ def spilt_data(data_name, rate=0.8, read=False):
         train = []
         test = []
         val = []
+        robust = []
         count = 0
         for _, tra_group in group.groupby('trajectory_id'):
             if count == 0:
@@ -210,23 +209,27 @@ def spilt_data(data_name, rate=0.8, read=False):
                 val_len -= 1
             elif test_len > 0:
                 test.append(np.array(tra_group.drop(['trajectory_id'], axis=1)))
+                robust.append(np.array(tra_group.sample(frac=robust_rate).drop(['trajectory_id'], axis=1)))
                 test_len -= 1
         train_data += train
         val_data += val
         test_data += test
+        robust_data += robust
     if not os.path.exists('./processed/{}/poi_data'.format(data_name)):
         os.makedirs('./processed/{}/poi_data'.format(data_name))
     train_data = np.array(train_data)
     test_data = np.array(test_data)
     val_data = np.array(val_data)
+    robust_data = np.array(robust_data)
     pickle.dump(train_data, open('./processed/{}/poi_data/train_data.pkl'.format(data_name), 'wb'))
     pickle.dump(val_data, open('./processed/{}/poi_data/val_data.pkl'.format(data_name), 'wb'))
     pickle.dump(test_data, open('./processed/{}/poi_data/test_data.pkl'.format(data_name), 'wb'))
-    print(len(train_data), len(val_data), len(test_data))
+    pickle.dump(robust_data, open('./processed/{}/poi_data/robust_test_data_{}.pkl'.format(data_name, robust_rate), 'wb'))
+    print(len(train_data), len(val_data), len(test_data), len(robust_data))
 
 
 def get_poi_neighbor(data_name, top):
-    df = pd.read_csv('./data/{}_filter.csv'.format(data_name))
+    df = pd.read_csv('./data/filter_data/{}_filter.csv'.format(data_name))
     df = df[['poi_id', 'latitude', 'longitude']]
     df.drop_duplicates(subset=['poi_id'], inplace=True)
     print(df.head())
@@ -245,12 +248,12 @@ def get_poi_neighbor(data_name, top):
     for key in dist_dict.keys():
         dist_dict[key] = sorted(dist_dict[key], key=lambda x: x[1])
         dist_dict[key] = dist_dict[key][:top]
-    pickle.dump(dist_dict, open(os.path.join('./processed/{}/poi_data/poi_neighbor.pkl'.format(data_name)), 'wb'))
+    pickle.dump(dist_dict, open(os.path.join('./processed/{}/poi_data/poi_neighbor_{}.pkl'.format(data_name, top)), 'wb'))
 
 
 if __name__ == '__main__':
-    spilt_data('CA', rate=0.8, read=True)
-    get_poi_neighbor('CA', 20)
+    spilt_data('TKY', rate=0.8, read=True, robust_rate=0.2)
+    # get_poi_neighbor('TKY', 50)
     # dataset = PoiDataset('NYC', 'train')
     # train_loader = data.DataLoader(dataset=dataset, batch_size=32, shuffle=False, collate_fn=lambda x: x)
     # for _, batch_data in enumerate(train_loader, 1):
