@@ -66,18 +66,19 @@ class GlobalGraphNet(nn.Module):
         feature = inputs.x
         edges = inputs.edge_index
         poi_feature = feature[:, 0: 1].int()
-        cat_feature = feature[:, 1: 2].int()
-        lat_feature = feature[:, 3:4].int()
-        long_feature = feature[:, 4:].int()
+        # cat_feature = feature[:, 1: 2].int()
+        lat_feature = feature[:, 2:3].int()
+        long_feature = feature[:, 3:].int()
         poi_feature = self.poi_emb(poi_feature)
-        cat_feature = self.cat_emb(cat_feature)
+        # cat_feature = self.cat_emb(cat_feature)
         lat_feature = self.lat_emb(lat_feature)
         long_feature = self.long_emb(long_feature)
         poi_feature = poi_feature.reshape(poi_feature.shape[0], -1)
-        cat_feature = cat_feature.reshape(cat_feature.shape[0], -1)
+        # cat_feature = cat_feature.reshape(cat_feature.shape[0], -1)
         lat_feature = lat_feature.reshape(lat_feature.shape[0], -1)
         long_feature = long_feature.reshape(long_feature.shape[0], -1)
-        feature = torch.cat((poi_feature, cat_feature, lat_feature, long_feature), dim=1)
+        # feature = torch.cat((poi_feature, cat_feature, lat_feature, long_feature), dim=1)
+        feature = torch.cat((poi_feature, lat_feature, long_feature), dim=1)
         feature = self.relu(self.cov_in(feature, edges))
         for i in range(self.gcn_layers):
             feature = self.gcn_net[i](feature, edges)
@@ -157,18 +158,19 @@ class UserGraphNet(nn.Module):
     def forward(self, feature, edges, weight):
         raw_batch = feature.shape[0]
         poi_feature = feature[:, :, 0: 1].int()
-        cat_feature = feature[:, :, 1: 2].int()
-        lat_feature = feature[:, :, 3:4].int()
-        long_feature = feature[:, :, 4:].int()
+        # cat_feature = feature[:, :, 1: 2].int()
+        lat_feature = feature[:, :, 2:3].int()
+        long_feature = feature[:, :, 3:].int()
         poi_feature = self.poi_emb(poi_feature)
-        cat_feature = self.cat_emb(cat_feature)
+        # cat_feature = self.cat_emb(cat_feature)
         lat_feature = self.lat_emb(lat_feature)
         long_feature = self.long_emb(long_feature)
         poi_feature = poi_feature.reshape(poi_feature.shape[0], poi_feature.shape[1], -1)
-        cat_feature = cat_feature.reshape(cat_feature.shape[0], cat_feature.shape[1], -1)
+        # cat_feature = cat_feature.reshape(cat_feature.shape[0], cat_feature.shape[1], -1)
         lat_feature = lat_feature.reshape(lat_feature.shape[0], lat_feature.shape[1], -1)
         long_feature = long_feature.reshape(long_feature.shape[0], long_feature.shape[1], -1)
-        feature = torch.cat((poi_feature, cat_feature, lat_feature, long_feature), dim=2)
+        # feature = torch.cat((poi_feature, cat_feature, lat_feature, long_feature), dim=2)
+        feature = torch.cat((poi_feature, lat_feature, long_feature), dim=2)
         user_graph_data = self.build_graph_data(feature, edges, weight)
         x, edges, weight, batch = user_graph_data.x, user_graph_data.edge_index, user_graph_data.edge_attr, user_graph_data.batch
         weight = weight[:, 1:2]
@@ -214,16 +216,16 @@ class UserHistoryNet(nn.Module):
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, inputs, neighbor):
-        poi_feature = torch.cat((inputs[:, :, 0: 2], inputs[:, :, 3:]), dim=2)
-        cat_feature = torch.cat((inputs[:, :, 0:1], inputs[:, :, 2:]), dim=2)
+        poi_feature = inputs
+        # cat_feature = torch.cat((inputs[:, :, 0:1], inputs[:, :, 2:]), dim=2)
         poi_out = self.get_output(poi_feature, self.embed_poi, self.embed_user, self.embed_hour, self.embed_week, self.gru_poi, self.poi_fc)
-        cat_out = self.get_output(cat_feature, self.embed_cat, self.embed_user, self.embed_hour, self.embed_week, self.gru_cat, self.cat_fc)
+        # cat_out = self.get_output(cat_feature, self.embed_cat, self.embed_user, self.embed_hour, self.embed_week, self.gru_cat, self.cat_fc)
         out_w_poi = self.out_w_poi[inputs[:, :, 0: 1].long()]
-        out_w_cat = self.out_w_cat[inputs[:, :, 0: 1].long()]
+        # out_w_cat = self.out_w_cat[inputs[:, :, 0: 1].long()]
         poi_out = torch.mul(poi_out, out_w_poi)
-        cat_out = torch.mul(cat_out, out_w_cat)
+        # cat_out = torch.mul(cat_out, out_w_cat)
         embed_neighbor = self.embed_poi(neighbor.int())
-        return poi_out + cat_out, embed_neighbor.reshape(embed_neighbor.shape[0], 1, -1)
+        return poi_out, embed_neighbor.reshape(embed_neighbor.shape[0], 1, -1)
 
     def get_output(self, inputs, embed_id, embed_user, embed_hour, embed_week, lstm, fc):
         b = inputs.shape[0]
