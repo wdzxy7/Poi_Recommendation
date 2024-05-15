@@ -44,16 +44,20 @@ class MinMaxNormalization(object):
 
 
 class PoiDataset(data.Dataset):
-    def __init__(self, data_name, data_type='train'):
+    def __init__(self, data_name, data_type='train', neighbor_size=20, robust_rate=0):
         self.data_name = data_name
         self.max_graph_node = 0
         self.max_graph_edges = 0
         self.max_graph_weight_len = 0
         poi_data_path = './processed/{}/poi_data/'.format(data_name)
         self.user_graph_path = './processed/{}/users'.format(data_name)
-        with open(poi_data_path + '{}_data.pkl'.format(data_type), 'rb') as f:
-            self.user_poi_data = pickle.load(f)
-        with open(poi_data_path + 'poi_neighbor_20.pkl', 'rb') as f:
+        if robust_rate > 0:
+            with open(poi_data_path + '{}_data_{}.pkl'.format(data_type, robust_rate), 'rb') as f:
+                self.user_poi_data = pickle.load(f)
+        else:
+            with open(poi_data_path + '{}_data.pkl'.format(data_type), 'rb') as f:
+                self.user_poi_data = pickle.load(f)
+        with open(poi_data_path + 'poi_neighbor_{}.pkl'.format(neighbor_size), 'rb') as f:
             self.poi_neighbor_data = pickle.load(f)
         self.poi_data = []
         self.past_data = []
@@ -209,7 +213,14 @@ def spilt_data(data_name, rate=0.8, read=False, robust_rate=0.9):
                 val_len -= 1
             elif test_len > 0:
                 test.append(np.array(tra_group.drop(['trajectory_id'], axis=1)))
-                robust.append(np.array(tra_group.sample(frac=robust_rate).drop(['trajectory_id'], axis=1)))
+                tra_group = tra_group.drop(['trajectory_id'], axis=1)
+                t = pd.DataFrame([], columns=tra_group.columns)
+                t = t.append(tra_group[:-1].sample(frac=robust_rate))
+                t = t.append(tra_group[-1:])
+                if len(t) == 1:
+                    robust.append(np.array(tra_group))
+                else:
+                    robust.append(np.array(t))
                 test_len -= 1
         train_data += train
         val_data += val
@@ -221,9 +232,9 @@ def spilt_data(data_name, rate=0.8, read=False, robust_rate=0.9):
     test_data = np.array(test_data)
     val_data = np.array(val_data)
     robust_data = np.array(robust_data)
-    pickle.dump(train_data, open('./processed/{}/poi_data/train_data.pkl'.format(data_name), 'wb'))
-    pickle.dump(val_data, open('./processed/{}/poi_data/val_data.pkl'.format(data_name), 'wb'))
-    pickle.dump(test_data, open('./processed/{}/poi_data/test_data.pkl'.format(data_name), 'wb'))
+    # pickle.dump(train_data, open('./processed/{}/poi_data/train_data.pkl'.format(data_name), 'wb'))
+    # pickle.dump(val_data, open('./processed/{}/poi_data/val_data.pkl'.format(data_name), 'wb'))
+    # pickle.dump(test_data, open('./processed/{}/poi_data/test_data.pkl'.format(data_name), 'wb'))
     pickle.dump(robust_data, open('./processed/{}/poi_data/robust_test_data_{}.pkl'.format(data_name, robust_rate), 'wb'))
     print(len(train_data), len(val_data), len(test_data), len(robust_data))
 
@@ -252,7 +263,7 @@ def get_poi_neighbor(data_name, top):
 
 
 if __name__ == '__main__':
-    spilt_data('TKY', rate=0.8, read=True, robust_rate=0.2)
+    spilt_data('CA', rate=0.8, read=True, robust_rate=0.8)
     # get_poi_neighbor('TKY', 50)
     # dataset = PoiDataset('NYC', 'train')
     # train_loader = data.DataLoader(dataset=dataset, batch_size=32, shuffle=False, collate_fn=lambda x: x)
