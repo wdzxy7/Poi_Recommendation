@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.utils.data as data
+from scipy.spatial.distance import cdist
 from tqdm import tqdm
 
 from build_trajectory_map import pre_process, filter_data, build_trajectory
@@ -183,7 +184,7 @@ def spilt_data(data_name, rate=0.8, read=False, robust_rate=0.9):
         df.drop(['cat_name', 'time', 'timezone', 'hour_48', 'day', 'latitude', 'longitude', 'timestamp'], axis=1, inplace=True)
     print(
         'Flitered data:\ndata_len: {}\t\t poi_len: {}\t\t user_len: {}\t\t trajectory_len: {}\t\t '.format(
-            len(df), len(set(df['poi_id'])), len(set(df['user_id'])),
+            len(df), len(set(df['poi_id'])), len(set(df['user_id'])), len(set(df['cat_id'])),
             len(set(df['trajectory_id']))))
     train_data = []
     test_data = []
@@ -232,10 +233,10 @@ def spilt_data(data_name, rate=0.8, read=False, robust_rate=0.9):
     test_data = np.array(test_data)
     val_data = np.array(val_data)
     robust_data = np.array(robust_data)
-    # pickle.dump(train_data, open('./processed/{}/poi_data/train_data.pkl'.format(data_name), 'wb'))
-    # pickle.dump(val_data, open('./processed/{}/poi_data/val_data.pkl'.format(data_name), 'wb'))
-    # pickle.dump(test_data, open('./processed/{}/poi_data/test_data.pkl'.format(data_name), 'wb'))
-    pickle.dump(robust_data, open('./processed/{}/poi_data/robust_test_data_{}.pkl'.format(data_name, robust_rate), 'wb'))
+    pickle.dump(train_data, open('./processed/{}/poi_data/train_data.pkl'.format(data_name), 'wb'))
+    pickle.dump(val_data, open('./processed/{}/poi_data/val_data.pkl'.format(data_name), 'wb'))
+    pickle.dump(test_data, open('./processed/{}/poi_data/test_data.pkl'.format(data_name), 'wb'))
+    # pickle.dump(robust_data, open('./processed/{}/poi_data/robust_test_data_{}.pkl'.format(data_name, robust_rate), 'wb'))
     print(len(train_data), len(val_data), len(test_data), len(robust_data))
 
 
@@ -245,17 +246,13 @@ def get_poi_neighbor(data_name, top):
     df.drop_duplicates(subset=['poi_id'], inplace=True)
     print(df.head())
     dist_dict = dict()
-    bar = tqdm(total=df.shape[0] * df.shape[0])
-    bar.set_description('Computing')
-    for i in range(df.shape[0]):
+    dis_data = df[['latitude', 'longitude']]._values
+    distances = cdist(dis_data, dis_data)
+    for i in tqdm(range(distances.shape[0])):
         poi = int(df.iloc[i]['poi_id'])
-        point1 = np.array([df.iloc[i]['latitude'], df.iloc[i]['longitude']])
         dist_dict[poi] = []
-        for j in range(df.shape[0]):
-            point2 = np.array([df.iloc[j]['latitude'], df.iloc[j]['longitude']])
-            dist = np.linalg.norm(point1 - point2) * 1000000
-            dist_dict[poi].append([int(df.iloc[j]['poi_id']), dist])
-            bar.update(1)
+        for j in range(distances.shape[1]):
+            dist_dict[poi].append([poi, distances[i][j]])
     for key in dist_dict.keys():
         dist_dict[key] = sorted(dist_dict[key], key=lambda x: x[1])
         dist_dict[key] = dist_dict[key][:top]
@@ -263,8 +260,8 @@ def get_poi_neighbor(data_name, top):
 
 
 if __name__ == '__main__':
-    spilt_data('CA', rate=0.8, read=True, robust_rate=0.8)
-    # get_poi_neighbor('TKY', 50)
+    spilt_data('TKY', rate=0.8, read=True, robust_rate=0.8)
+    get_poi_neighbor('TKY', 20)
     # dataset = PoiDataset('NYC', 'train')
     # train_loader = data.DataLoader(dataset=dataset, batch_size=32, shuffle=False, collate_fn=lambda x: x)
     # for _, batch_data in enumerate(train_loader, 1):

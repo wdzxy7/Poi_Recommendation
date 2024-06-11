@@ -43,17 +43,26 @@ def build_global_graph_data():
     for key in node_dict.keys():
         node_id = node_dict[key]
         node = node_feature[node_id]
-        feature = [node_id, node['poi_catid'], node['checkin_cnt'], node['latitude'], node['longitude']]
+        if data_name != 'CA':
+            feature = [node_id, node['poi_catid'], node['checkin_cnt'], node['latitude'], node['longitude']]
+        else:
+            feature = [node_id, node['checkin_cnt'], node['latitude'], node['longitude']]
         features.append(feature)
         if node['checkin_cnt'] > max_checkin:
             max_checkin = node['checkin_cnt']
     features = torch.FloatTensor(features)
-    features[:, 3: 5] = change_gps(features[:, 3: 5])
-    checkins = features[:, 2: 3].numpy()
+    if data_name != 'CA':
+        gps_s = 3
+        check_s = 2
+    else:
+        gps_s = 2
+        check_s = 1
+    features[:, gps_s: gps_s + 2] = change_gps(features[:, gps_s: gps_s + 2])
+    checkins = features[:, check_s: check_s + 1].numpy()
     mmn = MinMaxNormalization(min_=0, max_=max_checkin)
     mmn.fit(checkins)
     mmn_all_data = [mmn.transform(d) for d in checkins]
-    features[:, 2: 3] = torch.FloatTensor(mmn_all_data)
+    features[:, check_s: check_s + 1] = torch.FloatTensor(mmn_all_data)
     data = Data(x=features, edge_index=edge_index)
     pickle.dump(data, open('./processed/{}/global_graph_data.pkl'.format(data_name), 'wb'))
     pickle.dump(weight, open('./processed/{}/global_graph_weight_data.pkl'.format(data_name), 'wb'))
@@ -81,17 +90,26 @@ def build_user_graph_data():
         for key in node_dict.keys():
             node_id = node_dict[key]
             node = node_feature[node_id]
-            feature = [node_id, node['poi_catid'], node['checkin_cnt'], node['latitude'], node['longitude']]
+            if data_name != 'CA':
+                feature = [node_id, node['poi_catid'], node['checkin_cnt'], node['latitude'], node['longitude']]
+            else:
+                feature = [node_id, node['checkin_cnt'], node['latitude'], node['longitude']]
             features.append(feature)
             if node['checkin_cnt'] > max_count:
                 max_count = node['checkin_cnt']
         features = torch.FloatTensor(features)
-        features[:, 3: 5] = change_gps(features[:, 3: 5])
-        checkins = features[:, 2: 3].numpy()
+        if data_name != 'CA':
+            gps_s = 3
+            check_s = 2
+        else:
+            gps_s = 2
+            check_s = 1
+        features[:, gps_s: gps_s + 2] = change_gps(features[:, gps_s: gps_s + 2])
+        checkins = features[:, check_s: check_s + 1].numpy()
         mmn = MinMaxNormalization(min_=0, max_=max_checkin_count)
         mmn.fit(checkins)
         mmn_all_data = [mmn.transform(d) for d in checkins]
-        features[:, 2: 3] = torch.FloatTensor(mmn_all_data)
+        features[:,  check_s: check_s + 1] = torch.FloatTensor(mmn_all_data)
         data = Data(x=features, edge_index=edge_index)
         pickle.dump(data, open('./processed/{}/users/{}_user_graph_data.pkl'.format(data_name, i), 'wb'))
         pickle.dump(torch.Tensor(weight_list), open('./processed/{}/users/{}_user_graph_weight_data.pkl'.format(data_name, i), 'wb'))
