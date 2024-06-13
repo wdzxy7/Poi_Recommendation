@@ -11,28 +11,29 @@ import torch.nn as nn
 from utils import PoiDataset
 import torch.utils.data as data
 from torch.nn.utils.rnn import pad_sequence
-from CA_model import GlobalGraphNet, GlobalDistNet, UserGraphNet, UserHistoryNet, TransformerModel
+from Model import GlobalGraphNet, GlobalDistNet, UserGraphNet, UserHistoryNet, TransformerModel
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
 parser = argparse.ArgumentParser(description='Parameters for my model')
-parser.add_argument('--poi_len', type=int, default=12005, help='The length of POI_id,NYC is 5099, TKY is 61858')
-parser.add_argument('--user_len', type=int, default=11337, help='The length of users')
-parser.add_argument('--cat_len', type=int, default=286, help='The length of category')
-parser.add_argument('--node_len', type=int, default=618, help='The length of user graph node(debug to see)')
-parser.add_argument('--lat_len', type=int, default=12005, help='The length of gps')
-parser.add_argument('--long_len', type=int, default=12005, help='The length of gps')
 
-parser.add_argument('--cat_dim', type=int, default=250, help='The embedding dim of poi category')
-parser.add_argument('--user_dim', type=int, default=250, help='The embedding dim of poi users')
+parser.add_argument('--poi_len', type=int, default=7791, help='The length of POI_id,NYC is 5099, TKY is 61858')
+parser.add_argument('--user_len', type=int, default=2124, help='The length of users')
+parser.add_argument('--cat_len', type=int, default=286, help='The length of category')
+parser.add_argument('--node_len', type=int, default=334, help='The length of user graph node(debug to see)')
+parser.add_argument('--lat_len', type=int, default=7791, help='The length of gps')
+parser.add_argument('--long_len', type=int, default=7791, help='The length of gps')
+
+parser.add_argument('--cat_dim', type=int, default=200, help='The embedding dim of poi category')
+parser.add_argument('--user_dim', type=int, default=150, help='The embedding dim of poi users')
 parser.add_argument('--poi_dim', type=int, default=100, help='The embedding dim of pois')
 parser.add_argument('--gps_dim', type=int, default=100, help='The embedding dim of gps')
 parser.add_argument('--gcn_channel', type=int, default=128, help='The channels in GCN')
 
-parser.add_argument('--neighbor_size', type=int, default=50, help='The size of neighbor')
+parser.add_argument('--neighbor_size', type=int, default=20, help='The size of neighbor')
 parser.add_argument('--graph_out_dim', type=int, default=1024, help='The embedding dim of three graph Conv')
 parser.add_argument('--global_graph_layers', type=int, default=5, help='The gcn layers in GlobalGraphNet')
-parser.add_argument('--global_dist_features', type=int, default=1112, help='The feature sum of global distance graph(debug to see)')
+parser.add_argument('--global_dist_features', type=int, default=2294, help='The feature sum of global distance graph(debug to see)')
 parser.add_argument('--global_dist_layers', type=int, default=4, help='The gcn layers in GlobalDistNet')
 parser.add_argument('--user_graph_layers', type=int, default=3, help='The gcn layers in UserGraphNet')
 parser.add_argument('--embed_size_user', type=int, default=150, help='The embedding dim of embed_size_user in UserHistoryNet')  #150
@@ -52,13 +53,13 @@ parser.add_argument('--batch_size', type=int, default=32, help='Batch size of da
 parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate of optimizer')
 parser.add_argument('--weight_decay', type=float, default=0, help='Weight_decay of optimizer')
 parser.add_argument('--lr_scheduler_factor', type=float, default=0.1, help='The decrease rate of ReduceLROnPlateau')
-parser.add_argument('--data_name', type=str, default='CA', help='Train data name')
-parser.add_argument('--gpu_num', type=int, default=7, help='Choose which GPU to use')
+parser.add_argument('--data_name', type=str, default='TKY', help='Train data name')
+parser.add_argument('--gpu_num', type=int, default=2, help='Choose which GPU to use')
 parser.add_argument('--seed', type=int, default=5566, help='random seed')
 
 
 def load_data():
-    test_dataset = PoiDataset(data_name, data_type='robust_test', robust_rate=0.9, neighbor_size=neighbor_size)
+    test_dataset = PoiDataset(data_name, data_type='test', robust_rate=-0.2, neighbor_size=neighbor_size)
     test_loader = data.DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x)
     return test_loader
 
@@ -88,6 +89,8 @@ def get_dist_mask(global_dist):
 def test_model():
     global gg_time, gd_time, ug_time, uh_time, trans_time
     test_loader = load_data()
+    with  open(os.path.join('./processed/{}/poi_data/poi_neighbor_{}.pkl'.format(data_name, neighbor_size)), 'rb') as f:
+        dis_mess = pickle.load(f)
     global_graph, global_graph_weight, global_dist, global_dist_weight = load_global_graph()
     dist_mask = get_dist_mask(global_dist)
     global_graph_model = GlobalGraphNet(cat_len=cat_len + 1, poi_len=poi_len + 1, cat_dim=cat_dim, poi_dim=poi_dim,
@@ -127,6 +130,7 @@ def test_model():
     test_batches_top10_acc_list = []
     test_batches_top15_acc_list = []
     test_batches_top20_acc_list = []
+    test_batches_top30_acc_list = []
     test_batches_mAP1_list = []
     test_batches_mAP5_list = []
     test_batches_mAP10_list = []
@@ -156,7 +160,7 @@ def test_model():
             t1 = time.time()
             global_graph_feature = global_graph_model(global_graph, global_graph_weight)
             t2 = time.time()
-            global_dist_feature = global_dist_model(global_dist, dist_mask, global_dist_weight)
+            global_dist_feature, mask_time = global_dist_model(global_dist, dist_mask, global_dist_weight)
             t3 = time.time()
             user_graph_feature = user_graph_model(user_graph, user_graph_edges, user_graph_weight)
             t4 = time.time()
@@ -174,12 +178,14 @@ def test_model():
             gd_time.append(t3 - t2)
             ug_time.append(t4 - t3)
             uh_time.append(t5 - t4)
+            m_time.append(mask_time)
             trans_time.append(t7 - t6)
             precision_1 = 0
             precision_5 = 0
             precision_10 = 0
             precision_15 = 0
             precision_20 = 0
+            precision_30 = 0
             mAP1 = 0
             mAP5 = 0
             mAP10 = 0
@@ -188,14 +194,18 @@ def test_model():
             mrr = 0
             y_pred = y_pred.detach().cpu().numpy()
             y = y.detach().cpu().numpy()
-            for predict, true, tra_len in zip(y_pred, y, trajectory_len):
+            for predict, true, tra_len, history in zip(y_pred, y, trajectory_len, history_feature):
                 true = true[: tra_len]
                 predict = predict[: tra_len, :]
+                # user poi cat hour week
+                last_trajectory = history[-1: tra_len, :]
+                poi_neighbor = neighbor.detach().cpu().numpy()
                 precision_1 += top_k_acc_last_timestep(true, predict, k=1)
                 precision_5 += top_k_acc_last_timestep(true, predict, k=5)
                 precision_10 += top_k_acc_last_timestep(true, predict, k=10)
                 precision_15 += top_k_acc_last_timestep(true, predict, k=15)
                 precision_20 += top_k_acc_last_timestep(true, predict, k=20)
+                precision_30 += top_k_acc_last_timestep(true, predict, k=30)
                 mAP1 += mAP_metric_last_timestep(true, predict, k=1)
                 mAP5 += mAP_metric_last_timestep(true, predict, k=5)
                 mAP10 += mAP_metric_last_timestep(true, predict, k=10)
@@ -207,6 +217,7 @@ def test_model():
             test_batches_top10_acc_list.append(precision_10 / y.shape[0])
             test_batches_top15_acc_list.append(precision_15 / y.shape[0])
             test_batches_top20_acc_list.append(precision_20 / y.shape[0])
+            test_batches_top30_acc_list.append(precision_30 / y.shape[0])
             test_batches_mAP1_list.append(mAP1 / y.shape[0])
             test_batches_mAP5_list.append(mAP5 / y.shape[0])
             test_batches_mAP10_list.append(mAP10 / y.shape[0])
@@ -214,9 +225,9 @@ def test_model():
             test_batches_mAP20_list.append(mAP20 / y.shape[0])
             test_batches_mrr_list.append(mrr / y.shape[0])
     mess = (
-        "\rTESTING: Epoch:{}\t\t  precision_1:{}\t\t precision_5:{}\t\t precision_10:{} \t\t precision_15:{} \t\t precision_20:{} "
+        "\rTESTING: Epoch:{}\t\t acc30:{} \t\t  precision_1:{}\t\t precision_5:{}\t\t precision_10:{} \t\t precision_15:{} \t\t precision_20:{} "
         "\t\t mAP1:{} \t\t mAP5:{} \t\t mAP10:{} \t\t mAP15:{} \t\t mAP20:{} \t\t mrr:{}.".
-        format(1, np.mean(test_batches_top1_acc_list), np.mean(test_batches_top5_acc_list)
+        format(1, np.mean(test_batches_top30_acc_list), np.mean(test_batches_top1_acc_list), np.mean(test_batches_top5_acc_list)
                , np.mean(test_batches_top10_acc_list), np.mean(test_batches_top15_acc_list),
                np.mean(test_batches_top20_acc_list), np.mean(test_batches_mAP1_list), np.mean(test_batches_mAP5_list),
                np.mean(test_batches_mAP10_list), np.mean(test_batches_mAP15_list), np.mean(test_batches_mAP20_list),
@@ -343,8 +354,9 @@ if __name__ == '__main__':
     ug_time = []
     uh_time = []
     trans_time = []
+    m_time = []
     for i in range(10):
         test_model()
     print('time cost: \t\t global_graph:{} \t\t global_distance_graph:{} \t\t user_graph:{} \t\t history_graph:{} '
-          '\t\t transformer_graph:{}'.format(np.mean(gg_time), np.mean(gd_time), np.mean(ug_time), np.mean(uh_time),
-                                             np.mean(trans_time)))
+          '\t\t transformer_graph:{}\t\t mask_time:{}'.format(np.mean(gg_time), np.mean(gd_time), np.mean(ug_time), np.mean(uh_time),
+                                             np.mean(trans_time), np.mean(m_time)))
