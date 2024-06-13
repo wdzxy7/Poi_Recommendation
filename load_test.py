@@ -17,12 +17,12 @@ os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 parser = argparse.ArgumentParser(description='Parameters for my model')
 
-parser.add_argument('--poi_len', type=int, default=7791, help='The length of POI_id,NYC is 5099, TKY is 61858')
-parser.add_argument('--user_len', type=int, default=2124, help='The length of users')
-parser.add_argument('--cat_len', type=int, default=286, help='The length of category')
-parser.add_argument('--node_len', type=int, default=334, help='The length of user graph node(debug to see)')
-parser.add_argument('--lat_len', type=int, default=7791, help='The length of gps')
-parser.add_argument('--long_len', type=int, default=7791, help='The length of gps')
+parser.add_argument('--poi_len', type=int, default=4970, help='The length of POI_id,NYC is 5099, TKY is 61858')
+parser.add_argument('--user_len', type=int, default=873, help='The length of users')
+parser.add_argument('--cat_len', type=int, default=314, help='The length of category')
+parser.add_argument('--node_len', type=int, default=235, help='The length of user graph node(debug to see)')
+parser.add_argument('--lat_len', type=int, default=4970, help='The length of gps')
+parser.add_argument('--long_len', type=int, default=4970, help='The length of gps')
 
 parser.add_argument('--cat_dim', type=int, default=200, help='The embedding dim of poi category')
 parser.add_argument('--user_dim', type=int, default=150, help='The embedding dim of poi users')
@@ -33,7 +33,7 @@ parser.add_argument('--gcn_channel', type=int, default=128, help='The channels i
 parser.add_argument('--neighbor_size', type=int, default=20, help='The size of neighbor')
 parser.add_argument('--graph_out_dim', type=int, default=1024, help='The embedding dim of three graph Conv')
 parser.add_argument('--global_graph_layers', type=int, default=5, help='The gcn layers in GlobalGraphNet')
-parser.add_argument('--global_dist_features', type=int, default=2294, help='The feature sum of global distance graph(debug to see)')
+parser.add_argument('--global_dist_features', type=int, default=434, help='The feature sum of global distance graph(debug to see)')
 parser.add_argument('--global_dist_layers', type=int, default=4, help='The gcn layers in GlobalDistNet')
 parser.add_argument('--user_graph_layers', type=int, default=3, help='The gcn layers in UserGraphNet')
 parser.add_argument('--embed_size_user', type=int, default=150, help='The embedding dim of embed_size_user in UserHistoryNet')  #150
@@ -53,7 +53,7 @@ parser.add_argument('--batch_size', type=int, default=32, help='Batch size of da
 parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate of optimizer')
 parser.add_argument('--weight_decay', type=float, default=0, help='Weight_decay of optimizer')
 parser.add_argument('--lr_scheduler_factor', type=float, default=0.1, help='The decrease rate of ReduceLROnPlateau')
-parser.add_argument('--data_name', type=str, default='TKY', help='Train data name')
+parser.add_argument('--data_name', type=str, default='NYC', help='Train data name')
 parser.add_argument('--gpu_num', type=int, default=2, help='Choose which GPU to use')
 parser.add_argument('--seed', type=int, default=5566, help='random seed')
 
