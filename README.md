@@ -542,7 +542,7 @@ TABLE III: PERFORMANCE COMPARISON IN MAP@K AND MRR ON THREE DATASETS
 ## Architecture
 
 ```
-./model.pdf
+["./model.pdf"]
 ```
 
 ## Installation
