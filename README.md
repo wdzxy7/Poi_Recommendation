@@ -551,7 +551,7 @@ TABLE III: PERFORMANCE COMPARISON IN MAP@K AND MRR ON THREE DATASETS
 - Clone this repo
 
 ```
-git clone https://github.com/CQRhinoZ/GUGEN
+git clone https://github.com/wdzxy7/Poi_Recommendation.git
 ```
 
 ## Project Structure
@@ -581,15 +581,15 @@ After installing the dependency:
   journal={IEEE Transactions on Mobile Computing}, 
   title={GUGEN: Global User Graph Enhanced Network for Next POI Recommendation}, 
   year={2024},
-  volume={},
-  number={},
-  pages={1-12},
-  keywords={Trajectory;Long short term memory;History;Social networking (online);Data models;Transformers;Reviews;GRU;graph neural networks;long-term preference;next POI recommendation;recommendation systems},
+  volume={23},
+  number={12},
+  pages={14975-14986},
+  keywords={Trajectory;Long short term memory;History;Social networking (online);Data models;Transformers;Reviews;Recommendation systems;next POI recommendation;long-term preference;graph neural networks;GRU},
   doi={10.1109/TMC.2024.3455107}}
 
 ```
 
-Feel free to contact us:
+Feel free to contact my academic advisor:
 
 Xu ZHANG, Ph.D, Professor
 
